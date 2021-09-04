@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+if [[ $1 == "" ]]; then
+    ls $(bazel info output_base)/external
+else
+    ls $1
+fi
+
+exit

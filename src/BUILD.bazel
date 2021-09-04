@@ -1,0 +1,109 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+##########
+cc_library(
+    name  = "codept",
+    # alwayslink = True,
+    linkstatic = 1,
+    srcs  = [
+        "codept_emit.c",
+        "codept_emit.h",
+        "codept_parser.c",
+        "codept_parser.h",
+        "config.c",
+        "config.h",
+        "fs.c",
+        "fs.h",
+        "utils.c",
+        "utils.h",
+        "@uthash//:include",
+    ],
+    hdrs = [
+        "obazldeps.h"
+    ],
+    defines = select({
+        "//bzl/host:debug": ["DEBUG_TRACE"],
+        "//conditions:default":   []
+    }),
+    copts = [
+        "-std=c11",
+        "-g", "-O0",
+
+        "-I.",
+        "-I$(GENDIR)/src",
+        "-I$(GENDIR)/external/obazldeps/src",
+
+        "-Iexternal/libs7/src",
+
+        "-Iexternal/uthash/include",
+        "-Iexternal/libinih",
+        "-Iexternal/logc/src"
+    ],
+    deps = [
+        "//external/libinih:inih",
+        "//external/sfsexp",
+        "@libs7//src:s7",
+        "@logc//:logc",
+    ],
+    visibility = ["//visibility:public"]
+)
+
+########
+genrule(
+    name = "mkhdrs",
+    srcs = [
+        "codept_emit.c",
+        "config.c",
+        "codept_parser.c",
+        "fs.c",
+        "utils.c",
+    ],
+    outs = [
+        "codept_emit.h",
+        "config.h",
+        "codept_parser.h",
+        "fs.h",
+        "utils.h",
+    ],
+    cmd = "\n".join([
+        "SRC1=$(location codept_emit.c)",
+        "SRCDIR1=`dirname $$SRC1`",
+        "$(location @makeheaders//:makeheaders) \\",
+        "    $(location codept_emit.c) \\",
+        "    $(location config.c) \\",
+        "    $(location codept_parser.c) \\",
+        "    $(location fs.c) \\",
+        "    $(location utils.c) ",
+        "cp $${SRCDIR1}/*.h $(@D)",
+    ]),
+    tools = ["@makeheaders//:makeheaders"],
+    visibility = ["//visibility:public"]
+)
+
+########
+genrule(
+    name = "mkhdrs-export",
+    srcs = [
+        "codept_emit.c",
+        "config.c",
+        "codept_parser.c",
+        "fs.c",
+        "utils.c",
+    ],
+    outs = [
+        "obazldeps.h",
+    ],
+    cmd = "\n".join([
+        "SRC1=$(location codept_emit.c)",
+        "SRCDIR1=`dirname $$SRC1`",
+        "$(location @makeheaders//:makeheaders) -H \\",
+        "    $(location codept_emit.c) \\",
+        "    $(location config.c) \\",
+        "    $(location codept_parser.c) \\",
+        "    $(location fs.c) \\",
+        "    $(location utils.c) \\",
+        "    > $@",
+    ]),
+    tools = ["@makeheaders//:makeheaders"],
+    visibility = ["//visibility:public"]
+)

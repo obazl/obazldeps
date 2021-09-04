@@ -1,0 +1,73 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+##########
+cc_binary(
+    name  = "runner",
+    srcs  = [
+        "runner.c",
+        "runner.h",
+    ],
+    defines = select({
+        "//bzl/host:debug": ["DEBUG_TRACE"],
+        "//conditions:default":   []
+    }),
+    copts = [
+        "-std=c11",
+        "-g", "-O0",
+        "-I.",
+        "-I$(GENDIR)/src",
+        "-I$(GENDIR)/external/obazldeps/src",
+
+        "-I$(GENDIR)/test",
+        "-I$(GENDIR)/external/obazldeps/test",
+
+        "-Iexternal/uthash/include",
+        "-Iexternal/logc/src",
+        "-Iexternal/libinih",
+    ],
+    deps = [
+        "//src:codept",
+        "//external/libinih:inih",
+        "@logc//:logc",
+        "//external/sfsexp",
+    ],
+    visibility = ["//visibility:public"]
+)
+
+########
+genrule(
+    name = "mkhdrs",
+    srcs = [
+        # "obazl_codept.c",
+        # "obazl_config.c",
+        # "obazl_codept_parser.c",
+        # "obazl_fs.c",
+        # "obazl_opam.c",
+        # "obazl_utils.c",
+        "runner.c",
+    ],
+    outs = [
+        # "obazl_codept.h",
+        # "obazl_config.h",
+        # "obazl_codept_parser.h",
+        # "obazl_fs.h",
+        # "obazl_opam.h",
+        # "obazl_utils.h",
+        "runner.h",
+    ],
+    cmd = "\n".join([
+        "SRC1=$(location runner.c)",
+        "SRCDIR1=`dirname $$SRC1`",
+        "$(location @makeheaders//:makeheaders) \\",
+        # "    $(location obazl_codept.c) \\",
+        # "    $(location obazl_config.c) \\",
+        # "    $(location obazl_codept_parser.c) \\",
+        # "    $(location obazl_fs.c) \\",
+        # "    $(location obazl_opam.c) \\",
+        # "    $(location obazl_utils.c) ",
+        "    $(location runner.c) ",
+        "cp $${SRCDIR1}/*.h $(@D)",
+    ]),
+    tools = ["@makeheaders//:makeheaders"],
+    visibility = ["//visibility:public"]
+)
