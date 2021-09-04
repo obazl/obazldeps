@@ -216,17 +216,17 @@ int main(int argc, char *argv[])
     /*     } */
     /* } */
 
-    struct filedeps_s *fdeps, *tmpfdeps;
-    char **p = NULL;
-    HASH_ITER(hh, codept_filedeps, fdeps, tmpfdeps) {
-        log_debug("");
-        log_debug("fdeps->name: %s", fdeps->name);
-        /* log_debug("fdeps->type: %d", fdeps->type); */
-        log_debug("fdeps->deps:");
-        while ( (p=(char**)utarray_next(fdeps->deps, p))) {
-            log_debug("\t%s",*p);
-        }
-    }
+    /* struct filedeps_s *fdeps, *tmpfdeps; */
+    /* char **p = NULL; */
+    /* HASH_ITER(hh, codept_filedeps, fdeps, tmpfdeps) { */
+    /*     log_debug(""); */
+    /*     log_debug("fdeps->name: %s", fdeps->name); */
+    /*     /\* log_debug("fdeps->type: %d", fdeps->type); *\/ */
+    /*     log_debug("fdeps->deps:"); */
+    /*     while ( (p=(char**)utarray_next(fdeps->deps, p))) { */
+    /*         log_debug("\t%s",*p); */
+    /*     } */
+    /* } */
 
     obazl_shutdown();
 
