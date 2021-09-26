@@ -6,6 +6,7 @@
 #else // FIXME: macos test
 #include <limits.h>             /* PATH_MAX */
 #endif
+#include <pwd.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,11 +24,34 @@
 
 #include "config.h"
 
+bool debug;
+bool verbose;
+
 s7_scheme *s7;                  /* GLOBAL s7 */
 s7_pointer old_port;
 LOCAL s7_pointer result;
 int gc_loc = -1;
 const char *errmsg = NULL;
+
+
+char *callback_script_file = "ocamlark.scm"; // passed in 'data' attrib
+char *callback = "ocamlark_handler"; /* fn in callback_script_file  */
+
+/* script directories: sys, user, proj, in order
+   obazl (sys) scripts:
+       run under `bazel run`: dir in runfiles containing callback script
+           defaults to @ocamlark//scm
+       run directly: xdg system dir
+           XDG_DATA_DIRS = (/usr/local/share)/obazl/scm
+   user scripts:
+       ($HOME)/.obazl.d/scm
+       XDG_DATA_HOME = ($HOME/.local/share)/obazl/scm
+   proj scripts:
+       .obazl.d
+
+ */
+
+char *bazel_script_dir = NULL;
 
 LOCAL UT_string *opam_switch;
 LOCAL UT_string *opam_bin;
@@ -68,40 +92,134 @@ struct configuration_s obazl_config = {.obazl_version = OBAZL_VERSION, .libct = 
 
 UT_array *src_files;            /* FIXME: put this in configuration_s? */
 
+EXPORT int config_handler(void* config, const char* section, const char* name, const char* value)
+{
+    /* log_debug("config_handler section %s: %s=%s", section, name, value); */
+    struct configuration_s *pconfig = (struct configuration_s*)config;
+
+    #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
+
+    if (MATCH("obazl", "version")) {
+        log_debug("obazl version: %s", value);
+        return 1;
+    }
+
+    if (MATCH("srcs", "dirs")) {
+        /* log_debug("section: srcs; entry: dirs"); */
+        /* log_debug("\t%s", value); */
+        char *token, *sep = " ,\t";
+        token = strtok((char*)value, sep);
+        while( token != NULL ) {
+            /* if (token[0] == '/') { */
+            /*     log_error("Ini file: 'dir' values in section 'srcs' must be relative paths: %s", token); */
+            /*     ini_error = true; */
+            /*     return 0; */
+            /* } else { */
+                /* log_debug("pushing src dir: %s", token); */
+                utarray_push_back(pconfig->src_dirs, &token);
+                token = strtok(NULL, sep);
+            /* } */
+        }
+        return 1;
+    }
+
+    if (MATCH("watch", "dirs")) {
+        /* log_debug("section: watch; entry: dirs"); */
+        /* log_debug("\t%s", value); */
+        char *token, *sep = " ,\t";
+        token = strtok((char*)value, sep);
+        while( token != NULL ) {
+            if (token[0] == '/') {
+                log_error("Ini file: 'dir' values in section 'watch' must be relative paths: %s", token);
+                ini_error = true;
+                return 0;
+            } else {
+                /* log_debug("pushing watch dir: %s", token); */
+                utarray_push_back(pconfig->watch_dirs, &token);
+                token = strtok(NULL, sep);
+            }
+        }
+        return 1;
+    }
+
+    /* if (MATCH("obazl", "repos")) { */
+    /*     resolve_repos((char*)value); */
+    /* } */
+
+    /* if (MATCH("repos", "coq")) { */
+    /*     resolve_coq_repos((char*)value); */
+    /* } */
+
+    /* if (MATCH("repos", "ocaml")) { */
+    /*     resolve_ocaml_repos((char*)value); */
+    /* } */
+
+    /* if ( strncmp(section, "repo:", 5) == 0 ) { */
+    /*     /\* printf("REPO section: %s (%s = %s)\n", section, name, value); *\/ */
+    /*     char *the_repo = &section[5]; */
+
+    /*     char *repo_dir = get_workspace_dir(the_repo); */
+    /*     printf("repo: %s -> %s\n", the_repo, repo_dir); */
+
+    /*     /\* tmp_repo = NULL; *\/ */
+    /*     /\* HASH_FIND_STR(repo_map, the_repo, tmp_repo);  /\\* already in the hash? *\\/ *\/ */
+    /*     /\* if (tmp_repo) { *\/ */
+    /*     /\*     printf("%s -> %s\n", tmp_repo->name, tmp_repo->base_path); *\/ */
+    /*     /\* } else { *\/ */
+    /*     /\*     fprintf(stderr, "No WS repo found for '%s' listed in .obazlrc\n", the_repo); *\/ */
+    /*     /\*     exit(EXIT_FAILURE); *\/ */
+    /*     /\* } *\/ */
+    /* } */
+
+    /* if ( strcmp(section, "coqlibs") == 0 ) { */
+    /*     struct lib_s *cl = calloc(1, sizeof *cl); */
+    /*     cl->name = strdup(name); */
+    /*     cl->path = strdup(value); */
+    /*     pconfig->coqlibs[pconfig->libct] = cl; */
+    /*     /\* printf("loaded lib %d (%p): %s -> %s\n", *\/ */
+    /*     /\*        pconfig->libct, *\/ */
+    /*     /\*        pconfig->coqlibs[pconfig->libct], *\/ */
+    /*     /\*        pconfig->coqlibs[pconfig->libct]->name, *\/ */
+    /*     /\*        pconfig->coqlibs[pconfig->libct]->path); *\/ */
+    /*     pconfig->libct++; */
+    /* } */
+    return 1;
+}
+
 EXPORT int obazl_configure(char *_exec_root)
 {
-    log_debug("obazl_configure");
-    char *_proj_root = getenv("BUILD_WORKSPACE_DIRECTORY");
-    if (_proj_root == NULL) {
-        log_error("Env var 'BUILD_WORKSPACE_DIRECTORY' not found. This program must be run in a Bazel project.");
-        exit(EXIT_FAILURE);
-    }
-    log_debug("BUILD_WORKSPACE_DIRECTORY: %s", _proj_root);
-
+    /* log_debug("obazl_configure"); */
     utstring_new(exec_root);
     utstring_printf(exec_root, "%s", _exec_root);
-    log_debug("exec_root: %s", utstring_body(exec_root));
+    if (debug)
+        log_debug("EXEC_ROOT: %s", utstring_body(exec_root));
 
     utstring_new(runfiles_root);
     utstring_printf(runfiles_root, "%s", getcwd(NULL, 0));
-    log_debug("runfiles_root: %s", utstring_body(runfiles_root));
+    if (debug)
+        log_debug("runfiles_root: %s", utstring_body(runfiles_root));
+
+    char *_proj_root = getenv("BUILD_WORKSPACE_DIRECTORY");
+    if (_proj_root == NULL) {
+        if (debug)
+            log_warn("Env var 'BUILD_WORKSPACE_DIRECTORY' not found.");
+    }
+    if (debug)
+        log_debug("BUILD_WORKSPACE_DIRECTORY: %s", _proj_root);
+
+    char *_wd = getenv("BUILD_WORKING_DIRECTORY");
+    if (_wd == NULL) {
+        if (debug)
+            log_warn("Env var 'BUILD_WORKING_DIRECTORY' not found.");
+    }
+    if (debug)
+        log_debug("BUILD_WORKING_DIRECTORY: %s", _wd);
 
     utstring_new(proj_root);
-    utstring_printf(proj_root, "%s", _proj_root);
-    log_debug("proj_root: %s", utstring_body(proj_root));
-
-    /* .obazl.d hidden directory */
-    utstring_new(obazl_d);
-    utstring_printf(obazl_d, "%s/%s", utstring_body(proj_root), ".obazl.d");
-    log_debug("obazl_d: %s", utstring_body(obazl_d));
-    log_debug("mkdir %s", utstring_body(obazl_d));
-    int rc = mkdir(utstring_body(obazl_d), S_IRWXU | S_IRGRP | S_IWGRP);
-    if (rc != 0) {
-        if (errno != EEXIST) {
-            perror(utstring_body(obazl_d));
-            log_error("mkdir error");
-        }
-    }
+    if (_proj_root == NULL)
+        utstring_printf(proj_root, "%s", getcwd(NULL, 0));
+    else
+        utstring_printf(proj_root, "%s", _proj_root);
 
     /* .obazlrc config file */
     utstring_new(obazl_ini_path);
@@ -109,15 +227,33 @@ EXPORT int obazl_configure(char *_exec_root)
 
     utarray_new(src_files,&ut_str_icd);
 
+    /* .obazl.d must exist, for codept output */
+    utstring_new(obazl_d);
+    utstring_printf(obazl_d, "%s/%s", utstring_body(proj_root), ".obazl.d");
+
+    rc = access(utstring_body(obazl_d), R_OK);
+    if (rc) {
+        if (verbose)
+            log_info("Creating project obazl workdir: %s", utstring_body(obazl_ini_path));
+        rc = mkdir(utstring_body(obazl_d), S_IRWXU | S_IRGRP | S_IWGRP);
+        if (rc != 0) {
+            if (errno != EEXIST) {
+                perror(utstring_body(obazl_d));
+                log_error("mkdir error");
+            }
+        }
+    }
+
     utstring_new(codept_args_file);
     utstring_printf(codept_args_file, "%s/%s", utstring_body(obazl_d), codept_args_filename);
-    /* log_debug("codept_args_file: %s", utstring_body(codept_args_file)); */
 
     utstring_new(codept_deps_file);
     utstring_printf(codept_deps_file, "%s/%s", utstring_body(obazl_d), codept_deps_filename);
-    /* log_debug("codept_deps_file: %s", utstring_body(codept_deps_file)); */
 
     _s7_init();
+
+    chdir(_proj_root);
+    char *s = getcwd(NULL, 0);
 }
 
 void config_opam(char *_opam_switch)
@@ -187,8 +323,19 @@ EXPORT UT_array *inventory_opam(void)
 
 s7_pointer s7_error_handler(s7_scheme *sc, s7_pointer args)
 {
-  fprintf(stdout, "error: %s\n", s7_string(s7_car(args)));
-  return(s7_f(sc));
+    log_error("error: %s\n", s7_string(s7_car(args)));
+    fprintf(stdout, "error: %s\n", s7_string(s7_car(args)));
+    return(s7_f(sc));
+}
+
+LOCAL s7_pointer _dirname(s7_scheme *s7, s7_pointer args)
+{
+    /* log_debug("_dirname %s", s7_object_to_c_string(s7, args)); */
+    if ( !s7_is_null(s7, args) ) {
+        char *d = dirname(s7_object_to_c_string(s7, s7_car(args)));
+        return s7_make_string(s7, d);
+    } else
+        return s7_nil(s7);
 }
 
 LOCAL void _s7_init(void)
@@ -204,17 +351,200 @@ LOCAL void _s7_init(void)
                        s7_error_handler, 1, 0, false,
                        "our error handler");
 
-    //FIXME: error handling
-    /* look for error messages */
-    errmsg = s7_get_output_string(s7, s7_current_error_port(s7));
+    s7_define_safe_function(s7, "dirname", _dirname,
+                            1, 0, false,
+                            "dirname: return directory part of file path");
 
-    /* if we got something, wrap it in "[]" */
-    if ((errmsg) && (*errmsg)) {
-        log_error("[%s\n]", errmsg);
-        s7_quit(s7);
-        exit(EXIT_FAILURE);
+    set_load_path(callback_script_file);
+
+    s7_pointer lf;
+    /* log_info("loading default script: %s", callback_script_file); */
+    lf =  s7_load(s7, callback_script_file);
+}
+
+/*
+  sets bazel_script_dir to dir containing scriptfile, which must be
+  passed in 'data' attrib of cc_binary rule
+ */
+LOCAL void _config_bazel_load_path(char *scriptfile, UT_string *manifest)
+{
+    if (verbose)
+        log_info("Configuring for `bazel run`");
+    FILE * fp;
+    char * line = NULL;
+    size_t len = 0;
+    ssize_t read;
+
+    /* bazel (sys) script dir */
+    fp = fopen(utstring_body(manifest), "r");
+    if (fp == NULL) {
+        log_error("fopen failure %s", utstring_body(manifest));
+        /* exit(EXIT_FAILURE); */
     }
-    /* return s7; */
+
+    while ((read = getline(&line, &len, fp)) != -1) {
+        /* log_debug("Retrieved line of length %zu:", read); */
+        /* log_debug("\n%s", line); */
+        bool hit = false;
+        /* two tokens per line */
+        while ((bazel_script_dir = strsep(&line, " ")) != NULL) {
+            if (hit) {
+                bazel_script_dir = dirname(bazel_script_dir);
+                /* log_debug("bazel script dir: %s", bazel_script_dir); */
+                s7_add_to_load_path(s7, bazel_script_dir);
+                fclose(fp);
+                return;
+            } else {
+                char *dot = strrchr(bazel_script_dir, '/');
+                if (dot && !strcmp(dot+1, scriptfile))
+                    hit = true;
+            }
+        }
+    }
+    fclose(fp);
+    log_error("bazel script dir for %s not found", scriptfile);
+    exit(EXIT_FAILURE);
+}
+
+LOCAL void _config_project_load_path(void)
+{
+    char *project_script_dir = ".obazl.d/scm";
+
+    UT_string *proj_script_dir;
+    utstring_new(proj_script_dir);
+    utstring_printf(proj_script_dir, "%s/%s",
+                    utstring_body(proj_root), project_script_dir);
+    rc = access(utstring_body(proj_script_dir), R_OK);
+    if (rc) {
+        if (debug)
+            log_warn("project script dir %s not found",
+                     utstring_body(proj_script_dir));
+    } else {
+        s7_add_to_load_path(s7, utstring_body(proj_script_dir));
+    }
+
+    /* private project script dir */
+    UT_string *private_script_dir;
+    utstring_new(private_script_dir);
+    utstring_printf(private_script_dir, "%s/.private/scm",
+                    utstring_body(proj_root));
+    rc = access(utstring_body(private_script_dir), R_OK);
+    if (rc) {
+        log_warn("private script dir %s not found",
+                 utstring_body(private_script_dir));
+    } else {
+        s7_add_to_load_path(s7, utstring_body(private_script_dir));
+    }
+}
+
+LOCAL void _config_user_load_path(void)
+{
+    char *_home_dir = getenv("HOME");
+    char *_user_script_dir = ".obazl.d/scm";
+    UT_string *user_script_dir;
+
+    utstring_new(user_script_dir);
+    utstring_printf(user_script_dir, "%s/%s",
+                    _home_dir, _user_script_dir);
+
+    rc = access(utstring_body(user_script_dir), R_OK);
+    if (rc) {
+        log_info("Not found: user script dir: %s.",
+                 utstring_body(user_script_dir));
+    } else {
+        /* if (verbose) */
+        /*     log_info("user script dir: %s.", */
+        /*              utstring_body(user_script_dir)); */
+        s7_add_to_load_path(s7, utstring_body(user_script_dir));
+    }
+}
+
+LOCAL void _config_xdg_load_path(void)
+{
+    UT_string *xdg_bazel_script_dir;
+    UT_string *xdg_user_script_dir;
+
+    /* system obazl script dir: $XDG_DATA_DIRS/obazl/scm */
+    char *xdg_data_dirs = getenv("XDG_DATA_DIRS");
+    if (xdg_data_dirs == NULL) {
+        xdg_data_dirs = "/usr/local/share";
+    }
+    utstring_new(xdg_bazel_script_dir);
+    utstring_printf(xdg_bazel_script_dir, "%s/%s",
+                    xdg_data_dirs, "obazl/scm");
+    /* log_debug("xdg_bazel_script_dir: %s", */
+    /*           utstring_body(xdg_bazel_script_dir)); */
+
+    rc = access(utstring_body(xdg_bazel_script_dir), R_OK);
+    if (rc) {
+        log_info("Not found: obazl sys script dir: %s.",
+                 utstring_body(xdg_bazel_script_dir));
+    } else {
+        s7_add_to_load_path(s7, utstring_body(xdg_bazel_script_dir));
+    }
+
+    /* user obazl script dir: $XDG_DATA_HOME/obazl/scm */
+    struct passwd *pw = getpwuid(getuid());
+    const char *homedir = pw->pw_dir;
+    /* log_debug("HOME DIR: %s", homedir); */
+
+    utstring_new(xdg_user_script_dir);
+    char *xdg_data_home = getenv("XDG_DATA_HOME");
+    if (xdg_data_home == NULL) {
+        utstring_printf(xdg_user_script_dir, "%s/%s",
+                        homedir, ".local/share/obazl/scm");
+    } else {
+        utstring_printf(xdg_user_script_dir, "%s/%s",
+                        xdg_data_home, "obazl/scm");
+    }
+    /* log_debug("xdg_user_script_dir: %s", */
+    /*           utstring_body(xdg_user_script_dir)); */
+    rc = access(utstring_body(xdg_user_script_dir), R_OK);
+
+    if (rc) {
+        log_info("Not found: user script dir: %s.",
+                 utstring_body(xdg_user_script_dir));
+    } else {
+        s7_add_to_load_path(s7, utstring_body(xdg_user_script_dir));
+    }
+}
+
+EXPORT void set_load_path(char *scriptfile)
+{
+    /* log_debug("set_load_path for %s", scriptfile); */
+    char *_wd = getcwd(NULL, 0);
+    /* log_info("CURRENT WORKING DIRECTORY: %s", _wd); */
+
+    /* FIXME: reliable way to detect if we're run by bazel */
+
+    /* https://docs.bazel.build/versions/main/user-manual.html#run
+bazel run is similar, but not identical, to directly invoking the binary built by Bazel and its behavior is different depending on whether the binary to be invoked is a test or not. When the binary is not a test, the current working directory will be the runfiles tree of the binary. When the binary is a test, the current working directory will be the exec root and a good-faith attempt is made to replicate the environment tests are usually run in.
+  */
+
+    /* so if we find MANIFEST, we're running a test? */
+    char *mdir = dirname(_wd);
+    /* log_debug("MANIFEST DIR: %s", mdir); */
+
+    UT_string *manifest;
+    utstring_new(manifest);
+    utstring_printf(manifest, "%s%s", mdir, "/MANIFEST");
+    /* log_debug("MANIFEST: %s", utstring_body(manifest)); */
+
+    rc = access(utstring_body(manifest), R_OK);
+
+    if (rc) {
+        if (verbose)
+            log_info("Configuring for non-bazel run");
+        _config_xdg_load_path();
+        _config_user_load_path();
+    } else {
+        _config_bazel_load_path(scriptfile, manifest);
+    }
+    _config_project_load_path();
+    if (verbose) {
+        s7_pointer lp = s7_load_path(s7);
+        log_info("load path: %s", s7_object_to_c_string(s7, lp));
+    }
 }
 
 EXPORT void obazl_shutdown(void)

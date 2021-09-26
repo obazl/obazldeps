@@ -32,15 +32,21 @@ EXPORT struct obazl_deps_s *obazl_deps_parse_file(char *fname)
     /* FIXME: handle corrupted input */
     log_debug("obazl_deps_parse_file: %s", fname);
     s7_pointer port = s7_open_input_file(s7, fname, "r");
-    s7_pointer fn = s7_name_to_value(s7, "read");
-    s7_pointer obj = s7_read(s7, port);
     errmsg = s7_get_output_string(s7, s7_current_error_port(s7));
-    /* if we got something, wrap it in "[]" */
     if ((errmsg) && (*errmsg)) {
         log_error("[%s\n]", errmsg);
         s7_quit(s7);
         exit(EXIT_FAILURE);
     }
+    s7_pointer fn = s7_name_to_value(s7, "read");
+    s7_pointer obj = s7_read(s7, port);
+    errmsg = s7_get_output_string(s7, s7_current_error_port(s7));
+    if ((errmsg) && (*errmsg)) {
+        log_error("[%s\n]", errmsg);
+        s7_quit(s7);
+        exit(EXIT_FAILURE);
+    }
+
     log_debug("TEST %s", s7_object_to_c_string(s7, obj));
     /* obj = s7_read(s7, port); */
     /* errmsg = s7_get_output_string(s7, s7_current_error_port(s7)); */

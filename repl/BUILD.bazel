@@ -1,0 +1,75 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+##########
+cc_binary(
+    name  = "repl",
+    srcs  = ["repl.c", "repl.h"],
+    defines = select({
+        "//bzl/host:debug": ["DEBUG_TRACE"],
+        "//conditions:default":   []
+    }),
+    copts = select({
+        # strdup is non-standard, not supported on linux in strict c11 mode
+        "//bzl/host:macos": ["-std=c11"],
+        "//bzl/host:linux": ["-std=gnu11"],
+        "//conditions:default": ["-std=c11"],
+    }) + [
+        # "-pedantic-errors",
+        "-g", "-O0",
+
+        "-I$(GENDIR)/src",
+        "-I$(GENDIR)/external/ocamlark/src",
+
+        "-I$(GENDIR)/repl",
+        "-I$(GENDIR)/external/ocamlark/repl",
+
+        "-Iexternal/uthash/include",
+        "-Iexternal/libinih",
+        "-Iexternal/logc/src",
+
+        "-Iexternal/libs7/src",
+        "-Iexternal/ocamlark/libs7/src",
+        "-Iexternal/libs7/vendored/linenoise",
+        "-Iexternal/ocamlark/libs7/vendored/linenoise",
+    ],
+    # data = [
+    #     "//scm:ocamlark.scm"
+    # ],
+    linkopts = select({
+        "//bzl/host:macos": [],
+        "//bzl/host:linux": [ "-Wl,-E", "-ldl"],
+        "//conditions:default": {}
+    }) + [
+        "-lm",
+    ],
+    deps = [
+        "//src:codept",
+        "//external/libinih:inih",
+        "@logc//:logc",
+        "@libs7//src:s7",
+        "@libs7//vendored/linenoise",
+    ],
+    visibility = ["//visibility:public"]
+)
+
+########
+genrule(
+    name = "mkhdrs",
+    srcs = [
+        "repl.c",
+        # "//src:config.c",
+    ],
+    outs = [
+        "repl.h",
+    ],
+    cmd = "\n".join([
+        "SRC1=$(location repl.c)",
+        "SRCDIR1=`dirname $$SRC1`",
+        "$(location @makeheaders//:makeheaders) \\",
+        # "    $(location //src:config.c) \\",
+        "    $(location repl.c)",
+        "cp $${SRCDIR1}/*.h $(@D)",
+    ]),
+    tools = ["@makeheaders//:makeheaders"],
+    visibility = ["//visibility:public"]
+)

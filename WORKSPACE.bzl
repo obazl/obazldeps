@@ -88,16 +88,16 @@ filegroup(name = "include", srcs = glob(["include/*.h"]), visibility = ["//visib
     )
 
     ######
-    maybe(
-        http_archive,
-        name = "sfsexp",
-        build_file_content = all_content,
-        urls = [
-            "https://github.com/mjsottile/sfsexp/archive/ad589f9e6e0eca20345320e9c82a3aecc0a5c8aa.tar.gz"
-        ],
-        strip_prefix = "sfsexp-ad589f9e6e0eca20345320e9c82a3aecc0a5c8aa",
-        sha256 = "5a5e70f9d4dffc53a943879a04eedcd458986ddd24eb413c572a4e04fb3682a2"
-    )
+    # maybe(
+    #     http_archive,
+    #     name = "sfsexp",
+    #     build_file_content = all_content,
+    #     urls = [
+    #         "https://github.com/mjsottile/sfsexp/archive/ad589f9e6e0eca20345320e9c82a3aecc0a5c8aa.tar.gz"
+    #     ],
+    #     strip_prefix = "sfsexp-ad589f9e6e0eca20345320e9c82a3aecc0a5c8aa",
+    #     sha256 = "5a5e70f9d4dffc53a943879a04eedcd458986ddd24eb413c572a4e04fb3682a2"
+    # )
 
     ######
     maybe(

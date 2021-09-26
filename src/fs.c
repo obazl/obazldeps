@@ -839,7 +839,7 @@ EXPORT int fileseq(char *_root_dir,
 
 int fileseq_impl(char* rel_dir, UT_array *files)
 {
-    log_debug("fileseq_impl rootdir: %s, reldir: %s", root_dir, rel_dir);
+    /* log_debug("fileseq_impl rootdir: %s, reldir: %s", root_dir, rel_dir); */
 
     static curr_dir[PATH_MAX];
     memset(curr_dir, '\0', PATH_MAX);

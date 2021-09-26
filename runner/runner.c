@@ -19,7 +19,7 @@
 #include "uthash.h"
 #include "utstring.h"
 
-#include "obazldeps.h"
+#include "ocamlark.h"
 #include "runner.h"
 
 UT_array *opam_dirs;             /* string list */
@@ -40,100 +40,6 @@ extern UT_array *src_files;
 extern UT_string *codept_args_file;
 extern UT_string *codept_deps_file;
 extern struct filedeps_s *codept_filedeps;
-
-int config_handler(void* config, const char* section, const char* name, const char* value)
-{
-    /* log_debug("config_handler section %s: %s=%s", section, name, value); */
-    struct configuration_s *pconfig = (struct configuration_s*)config;
-
-    #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
-
-    if (MATCH("obazl", "version")) {
-        log_debug("obazl version: %s", value);
-        return 1;
-    }
-
-    if (MATCH("srcs", "dirs")) {
-        /* log_debug("section: srcs; entry: dirs"); */
-        /* log_debug("\t%s", value); */
-        char *token, *sep = " ,\t";
-        token = strtok((char*)value, sep);
-        while( token != NULL ) {
-            /* if (token[0] == '/') { */
-            /*     log_error("Ini file: 'dir' values in section 'srcs' must be relative paths: %s", token); */
-            /*     ini_error = true; */
-            /*     return 0; */
-            /* } else { */
-                log_debug("pushing src dir: %s", token);
-                utarray_push_back(pconfig->src_dirs, &token);
-                token = strtok(NULL, sep);
-            /* } */
-        }
-        return 1;
-    }
-
-    if (MATCH("watch", "dirs")) {
-        /* log_debug("section: watch; entry: dirs"); */
-        /* log_debug("\t%s", value); */
-        char *token, *sep = " ,\t";
-        token = strtok((char*)value, sep);
-        while( token != NULL ) {
-            if (token[0] == '/') {
-                log_error("Ini file: 'dir' values in section 'watch' must be relative paths: %s", token);
-                ini_error = true;
-                return 0;
-            } else {
-                /* log_debug("pushing watch dir: %s", token); */
-                utarray_push_back(pconfig->watch_dirs, &token);
-                token = strtok(NULL, sep);
-            }
-        }
-        return 1;
-    }
-
-    /* if (MATCH("obazl", "repos")) { */
-    /*     resolve_repos((char*)value); */
-    /* } */
-
-    /* if (MATCH("repos", "coq")) { */
-    /*     resolve_coq_repos((char*)value); */
-    /* } */
-
-    /* if (MATCH("repos", "ocaml")) { */
-    /*     resolve_ocaml_repos((char*)value); */
-    /* } */
-
-    /* if ( strncmp(section, "repo:", 5) == 0 ) { */
-    /*     /\* printf("REPO section: %s (%s = %s)\n", section, name, value); *\/ */
-    /*     char *the_repo = &section[5]; */
-
-    /*     char *repo_dir = get_workspace_dir(the_repo); */
-    /*     printf("repo: %s -> %s\n", the_repo, repo_dir); */
-
-    /*     /\* tmp_repo = NULL; *\/ */
-    /*     /\* HASH_FIND_STR(repo_map, the_repo, tmp_repo);  /\\* already in the hash? *\\/ *\/ */
-    /*     /\* if (tmp_repo) { *\/ */
-    /*     /\*     printf("%s -> %s\n", tmp_repo->name, tmp_repo->base_path); *\/ */
-    /*     /\* } else { *\/ */
-    /*     /\*     fprintf(stderr, "No WS repo found for '%s' listed in .obazlrc\n", the_repo); *\/ */
-    /*     /\*     exit(EXIT_FAILURE); *\/ */
-    /*     /\* } *\/ */
-    /* } */
-
-    /* if ( strcmp(section, "coqlibs") == 0 ) { */
-    /*     struct lib_s *cl = calloc(1, sizeof *cl); */
-    /*     cl->name = strdup(name); */
-    /*     cl->path = strdup(value); */
-    /*     pconfig->coqlibs[pconfig->libct] = cl; */
-    /*     /\* printf("loaded lib %d (%p): %s -> %s\n", *\/ */
-    /*     /\*        pconfig->libct, *\/ */
-    /*     /\*        pconfig->coqlibs[pconfig->libct], *\/ */
-    /*     /\*        pconfig->coqlibs[pconfig->libct]->name, *\/ */
-    /*     /\*        pconfig->coqlibs[pconfig->libct]->path); *\/ */
-    /*     pconfig->libct++; */
-    /* } */
-    return 1;
-}
 
 int main(int argc, char *argv[])
 {
@@ -184,10 +90,10 @@ int main(int argc, char *argv[])
     /*     log_debug("%s",*dir); */
     /* } */
 
-    dir = NULL;
-    while ( (dir=(char**)utarray_next(obazl_config.src_dirs,dir))) {
-        log_debug("src dir: %s",*dir);
-    }
+    /* dir = NULL; */
+    /* while ( (dir=(char**)utarray_next(obazl_config.src_dirs,dir))) { */
+    /*     log_debug("src dir: %s",*dir); */
+    /* } */
 
     /* list source files, to parameterize codept */
     fileseq(utstring_body(proj_root), /* input */
@@ -198,10 +104,15 @@ int main(int argc, char *argv[])
         log_debug("src file: %s",*dir);
     }
     emit_codept_args(codept_args_file, opam_dirs, src_files);
+    /* gen_codept_argsfile(utstring_body(proj_root), obazl_config.src_dirs); */
 
     run_codept(utstring_body(codept_args_file), utstring_body(codept_deps_file));
+    /* run_codept_s7(utstring_body(codept_deps_file)); */
+    log_info("finished run_codept");
 
     obazl_deps_parse_file(utstring_body(codept_deps_file));
+
+    run_ocamlark_handler(utstring_body(codept_deps_file));
 
     /* struct module_s *module, *tmp; */
     /* HASH_ITER(hh, codept_modules, module, tmp) { */

@@ -1,11 +1,15 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
+exports_files(glob(["*.scm"]))
+
 ##########
 cc_library(
     name  = "codept",
     # alwayslink = True,
     linkstatic = 1,
     srcs  = [
+        "codept.c",
+        "codept.h",
         "codept_emit.c",
         "codept_emit.h",
         "codept_parser.c",
@@ -18,8 +22,11 @@ cc_library(
         "utils.h",
         "@uthash//:include",
     ],
+    data = [
+        "//scm:ocamlark.scm"
+    ],
     hdrs = [
-        "obazldeps.h"
+        "ocamlark.h"
     ],
     defines = select({
         "//bzl/host:debug": ["DEBUG_TRACE"],
@@ -29,9 +36,8 @@ cc_library(
         "-std=c11",
         "-g", "-O0",
 
-        "-I.",
         "-I$(GENDIR)/src",
-        "-I$(GENDIR)/external/obazldeps/src",
+        "-I$(GENDIR)/external/ocamlark/src",
 
         "-Iexternal/libs7/src",
 
@@ -41,7 +47,6 @@ cc_library(
     ],
     deps = [
         "//external/libinih:inih",
-        "//external/sfsexp",
         "@libs7//src:s7",
         "@logc//:logc",
     ],
@@ -52,26 +57,29 @@ cc_library(
 genrule(
     name = "mkhdrs",
     srcs = [
+        "codept.c",
         "codept_emit.c",
-        "config.c",
         "codept_parser.c",
+        "config.c",
         "fs.c",
         "utils.c",
     ],
     outs = [
+        "codept.h",
         "codept_emit.h",
-        "config.h",
         "codept_parser.h",
+        "config.h",
         "fs.h",
         "utils.h",
     ],
     cmd = "\n".join([
-        "SRC1=$(location codept_emit.c)",
+        "SRC1=$(location codept.c)",
         "SRCDIR1=`dirname $$SRC1`",
         "$(location @makeheaders//:makeheaders) \\",
+        "    $(location codept.c) \\",
         "    $(location codept_emit.c) \\",
-        "    $(location config.c) \\",
         "    $(location codept_parser.c) \\",
+        "    $(location config.c) \\",
         "    $(location fs.c) \\",
         "    $(location utils.c) ",
         "cp $${SRCDIR1}/*.h $(@D)",
@@ -84,22 +92,24 @@ genrule(
 genrule(
     name = "mkhdrs-export",
     srcs = [
+        "codept.c",
         "codept_emit.c",
-        "config.c",
         "codept_parser.c",
+        "config.c",
         "fs.c",
         "utils.c",
     ],
     outs = [
-        "obazldeps.h",
+        "ocamlark.h",
     ],
     cmd = "\n".join([
         "SRC1=$(location codept_emit.c)",
         "SRCDIR1=`dirname $$SRC1`",
         "$(location @makeheaders//:makeheaders) -H \\",
+        "    $(location codept.c) \\",
         "    $(location codept_emit.c) \\",
-        "    $(location config.c) \\",
         "    $(location codept_parser.c) \\",
+        "    $(location config.c) \\",
         "    $(location fs.c) \\",
         "    $(location utils.c) \\",
         "    > $@",

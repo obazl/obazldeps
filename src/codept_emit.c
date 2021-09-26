@@ -36,108 +36,12 @@ int rc;
 /* char basedir[PATH_MAX]; */
 /* char coqlib[PATH_MAX]; */
 
-EXPORT void run_codept(char *codept_args_file, char *codept_deps_file)
-{
-    log_debug("running codept");
-
-    /* char cwd[PATH_MAX]; */
-    /* if (getcwd(cwd, sizeof(cwd)) != NULL) { */
-    /*     log_debug("Current working dir: %s", cwd); */
-    /* } */
-    /* log_debug("changing dir to %s", utstring_body(proj_root)); */
-    rc = chdir(utstring_body(proj_root));
-    if (rc) {
-        perror("chdir");
-        log_fatal("Unable to chdir to projroot %", utstring_body(proj_root));
-        exit(EXIT_FAILURE);
-    }
-
-    char cmd[PATH_MAX];
-    sprintf(cmd, "codept -k -args %s 2> /dev/null", codept_args_file);
-
-    bool keep = true;        /* ??? */
-
-    /* FILE *deps_fp; */
-    /* if (keep) { */
-    /*     printf("keeping %s\n", codept_deps_file); */
-    /*     deps_fp = fopen(codept_deps_file, "w"); */
-    /*     if (deps_fp == NULL) { */
-    /*         perror(codept_deps_file); */
-    /*         log_fatal("FAIL: run_codept fopen(%s, 'w')", codept_deps_file); */
-    /*         exit(EXIT_FAILURE); */
-    /*     } */
-    /* } */
-    /* log_debug("opened codept_deps_file %s for writing", codept_deps_file); */
-
-    /* log_debug("codept_args_file: %s", codept_args_file); */
-    /* log_debug("codept_deps_file: %s", codept_deps_file); */
-
-    pid_t pid;
-    int rc;
-    char *argv[] = {
-        "codept",
-        "-args", codept_args_file,
-        NULL};
-    extern char **environ;
-
-    posix_spawn_file_actions_t action;
-    posix_spawn_file_actions_init(&action);
-    posix_spawn_file_actions_addopen (&action, STDOUT_FILENO, codept_deps_file,
-                                      O_WRONLY | O_CREAT | O_TRUNC,
-                                      S_IRUSR | S_IWUSR | S_IRGRP );
-
-    // FIXME: get absolute path of codept
-    // FIXME: restrict environ
-
-    char *codept_cmd = "/Users/gar/.opam/4.10/bin/codept";
-    log_debug("spawning %s", codept_cmd);
-    rc = posix_spawn(&pid, codept_cmd, &action, NULL, argv, environ);
-    if (rc == 0) {
-        /* log_debug("posix_spawn child pid: %i\n", pid); */
-        if (waitpid(pid, &rc, 0) != -1) {
-            if (rc) {
-                log_error("codept rc: %d", rc);
-                exit(EXIT_FAILURE);
-            }
-        } else {
-            perror("waitpid");
-            log_error("run_codept posix_spawn");
-        }
-    } else {
-        /* does not set errno */
-        log_fatal("run_codept posix_spawn error rc: %d, %s", rc, strerror(rc));
-        exit(EXIT_FAILURE);
-    }
-
-    /* FILE *fp; */
-    /* if ((fp = popen(cmd, "r+")) == NULL) { */
-    /*     printf("Error opening pipe for codept!\n"); */
-    /*     exit(-1); */
-    /* } */
-    /* log_debug("action: %s", cmd); */
-    /* char buf[1024]; */
-    /* while (fgets(buf, sizeof(buf), fp) != NULL) { */
-    /*     if (keep) */
-    /*         fputs(buf, deps_fp); */
-    /*     process_codept_line(buf); */
-    /* } */
-    /* rc = pclose(fp); */
-    /* if (rc) { */
-    /*     exit(-1); */
-    /* } */
-
-    /* if (keep) { */
-    /*     fflush(deps_fp); */
-    /*     fclose(deps_fp); */
-    /* } */
-}
-
 LOCAL void emit_codept_src_files(FILE *fp, UT_array *src_files)
 {
     log_debug("emit_codept_src_files");
 
     /* fputs("-one-line\n", fp); */
-    fputs("-sexp\n", fp);
+    fputs("-sexp\n-k\n", fp);
 
     char **p = NULL;
     while ( (p=(char**)utarray_next(src_files, p))) {
@@ -222,9 +126,9 @@ EXPORT void emit_codept_args(UT_string *_codept_args_file, UT_array *opam_dirs, 
         exit(1);
     }
 
-    emit_codept_src_files(fp, src_files);
+    /* emit_codept_opam_dirs(fp, opam_dirs); */
 
-    emit_codept_opam_dirs(fp, opam_dirs);
+    emit_codept_src_files(fp, src_files);
 
     // PREPROCS: .mll, .mly, .mlg, etc. - files that require preprocessing
     /* struct preproc *pp, *pptmp; */
