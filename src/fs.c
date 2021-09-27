@@ -788,35 +788,17 @@ EXPORT int fileseq(char *_root_dir,
             UT_array *files)
 {
     log_debug("fileseq, root: %s", _root_dir);
-    /* UT_string *dir; */
-    /* utstring_new(dir); */
-    /* utstring_printf(dir, "%s", curr_dir); */
-    /* log_debug("fileseq len (preimpl): %d", utarray_len(files)); */
 
     root_dir = _root_dir;
 
-    char curr_dir[PATH_MAX];
     char rel_dir[PATH_MAX];
 
-    /* char **p = NULL; */
-    /* while ( (p=(char**)utarray_next(, p)) ) { */
-    /*     free(p); */
-    /* } */
     utarray_clear(files);
 
     char **p = NULL;
     while ( (p=(char**)utarray_next(subdirs, p)) ) {
-        /* memset(curr_dir, '\0', PATH_MAX); */
-        /* strncat(curr_dir, root_dir, strlen(root_dir)); */
-        /* strncat(curr_dir, "/", 1); */
-        /* strncat(curr_dir, *p, strlen(*p)); */
-
         memset(rel_dir, '\0', PATH_MAX);
-        /* strncat(reldir_dir, "/", 1); */
         strncat(rel_dir, *p, strlen(*p));
-        /* rel_dir[0] = '.'; */
-
-        /* log_debug("fileseq for %s/%s", root_dir, rel_dir); */
 
         int rc = fileseq_impl(rel_dir, files);
 
@@ -826,13 +808,6 @@ EXPORT int fileseq(char *_root_dir,
         }
         // FIXME: remove root dir?
     }
-
-    /* log_debug("fileseq len (postimpl): %d", utarray_len(files)); */
-    /* char **p = NULL; */
-    /* log_debug("fileseq impl result:"); */
-    /* while ( (p=(char**)utarray_next(files, p))) { */
-    /*     printf("\t%s\n", *p); */
-    /* } */
 
     return 0;
 }
@@ -855,13 +830,8 @@ int fileseq_impl(char* rel_dir, UT_array *files)
         errnum = errno;
         perror(curr_dir);
         log_fatal("fileseq_impl opendir");
-        /* printf("opendir failure for %s", curr_dir); */
-        /* fprintf(stderr, "Value of errno: %d\n", errnum); */
-        /* fprintf(stderr, "opendir error %s: %s\n", curr_dir, strerror( errnum )); */
         exit(1);
-        /* return(-1); */
     }
-    /* log_debug("opened dir %s", curr_dir); */
 
     if (the_dir) {
         while ((dir_entry = readdir(the_dir)) != NULL) {
@@ -871,34 +841,26 @@ int fileseq_impl(char* rel_dir, UT_array *files)
 
                     strncat(rel_dir, "/", 1);
                     strncat(rel_dir, dir_entry->d_name, strlen(dir_entry->d_name));
-                    /* log_debug("pushing %s", rel_dir); */
                     utarray_push_back(files, &rel_dir);
                     rel_dir[strlen(rel_dir) - strlen(dir_entry->d_name) - 1] = '\0';
 
                 } else {
-                    /* log_debug("skipping %s/%s", curr_dir, dir_entry->d_name); */
+                    ;
                 }
 
             } else {
                 if ( dir_entry->d_type == DT_DIR ) {
-                    if ( (dir_entry->d_name[0] == '.') ) {
+                    if (dir_entry->d_name[0] == '.') {
                         if (strncmp(dir_entry->d_name, ".pack", 5) == 0) {
                             ;
                             /* what about .private in OPAM repo? found in ounit2, dune-configurator */
                         } else {
-                            /* log_debug("ignoring dir: %s", dir_entry->d_name); */
                             continue;
                         }
                     }
-                    /* strncat(curr_dir, "/", 1); */
-                    /* strncat(curr_dir, dir_entry->d_name, strlen(dir_entry->d_name)); */
                     strncat(rel_dir, "/", 1);
                     strncat(rel_dir, dir_entry->d_name, strlen(dir_entry->d_name));
-
-                    /* log_debug("recurring on: %s", rel_dir); */
                     fileseq_impl(rel_dir, files);
-
-                    /* curr_dir[strlen(curr_dir) - strlen(dir_entry->d_name) - 1] = '\0'; */
                     rel_dir[strlen(rel_dir) - strlen(dir_entry->d_name) - 1] = '\0';
                 } else {
                     ; /* skip all other types */

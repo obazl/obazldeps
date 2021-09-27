@@ -158,18 +158,3 @@ char *run_cmd(char *cmd)
     }
     return buf;
 }
-
-char *get_cwd(void)
-{
-    log_debug("GET_CWD");
-    char cwd[PATH_MAX];
-    memset(cwd, '\0', PATH_MAX);
-    /* int cwd_len = 0; */
-    if (getcwd(cwd, sizeof(cwd)) != NULL) {
-        log_debug("Current working dir: %s", cwd);
-        return (char*)&cwd;
-    } else {
-        log_error("getcwd failure");
-        return NULL;
-    }
-}
