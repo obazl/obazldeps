@@ -15,7 +15,6 @@ cc_binary(
         "//conditions:default": ["-std=c11"],
     }) + [
         "-pedantic-errors",
-        "-g", "-O0",
 
         "-I$(GENDIR)/src",
         "-I$(GENDIR)/external/ocamlark/src",

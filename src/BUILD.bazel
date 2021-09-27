@@ -34,7 +34,6 @@ cc_library(
     }),
     copts = [
         "-std=c11",
-        "-g", "-O0",
 
         "-I$(GENDIR)/src",
         "-I$(GENDIR)/external/ocamlark/src",
