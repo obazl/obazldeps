@@ -1,5 +1,5 @@
-# ocamldeps
-OCaml project dependency analysis. C11 wrapper on [codept](https://github.com/Octachron/codept).
+# ocamlark
+ocamlark turns OCaml source files into Starlark build files. Uses [codept](https://github.com/Octachron/codept) to analyze dependencies.
 
 ## whole-project analysis
 

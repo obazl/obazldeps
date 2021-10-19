@@ -9,10 +9,10 @@
 #include "linenoise.h"
 #include "s7.h"
 
-#include "utarray.h"
-#include "utstring.h"
+/* #include "utarray.h" */
+/* #include "utstring.h" */
 
-#include "ocamlark.h"
+#include "camlark.h"
 #include "repl.h"
 
 extern s7_scheme *s7;
@@ -22,11 +22,11 @@ char *history = ".ocamlark.history.txt";
 extern bool debug;
 extern bool verbose;
 extern bool ini_error;
-extern UT_string *obazl_ini_path;
+/* extern UT_string *obazl_ini_path; */
 extern struct configuration_s obazl_config;
 
-UT_array *opam_dirs;             /* string list */
-extern UT_string *codept_args_file;
+/* UT_array *opam_dirs;             /\* string list *\/ */
+/* extern UT_string *codept_args_file; */
 
 void completion(const char *buf, linenoiseCompletions *lc) {
     if (buf[0] == 'h') {
@@ -49,71 +49,12 @@ void print_usage(void)
     printf("Usage: ocamlark [-m | -k | -v | -h ]\n");
 }
 
-int main(int argc, char **argv) {
-
-    int rc;
+void std_repl()
+{
+    char *line;
     char response[1024];        /* result of evaluating input */
 
-    char *line;
-    char *prgname = argv[0];
-
-    /* log_set_level(LOG_INFO); */
-
-    /* Parse options, with --multiline we enable multi line editing. */
-    int opt;
-    while ((opt = getopt(argc, argv, "dmkhv")) != -1) {
-        switch (opt) {
-        case 'd':
-            debug = true;
-            break;
-        case 'm':
-            linenoiseSetMultiLine(1);
-            printf("Multi-line mode enabled.\n");
-            break;
-        case 'k':
-            linenoisePrintKeyCodes();
-            exit(0);
-            break;
-        case 'h':
-            print_usage();
-            exit(EXIT_SUCCESS);
-            break;
-        case 'v':
-            verbose =true;
-            break;
-        default:
-            print_usage();
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    //s7 = s7_init();                 /* initialize the interpreter */
-    /* s7 = sunlark_init(); */
-    obazl_configure(getcwd(NULL, 0));
-
-    rc = access(utstring_body(obazl_ini_path), R_OK);
-    if (rc) {
-        log_warn("Config file %s not found.", utstring_body(obazl_ini_path));
-    } else {
-        ini_error = false;
-        utarray_new(obazl_config.src_dirs, &ut_str_icd);
-        utarray_new(obazl_config.watch_dirs, &ut_str_icd);
-        rc = ini_parse(utstring_body(obazl_ini_path), config_handler, &obazl_config);
-        /* log_debug("ini_parse rc: %d", rc); */
-        if (rc < 0) {
-            //FIXME: deal with missing .obazl
-            log_fatal("Can't load ini file: %s", utstring_body(obazl_ini_path));
-            return -1;
-        }
-        if (ini_error) {
-            log_error("Error parsing ini file");
-            exit(EXIT_FAILURE);
-        /* } else { */
-        /*     log_debug("Config loaded from %s", utstring_body(obazl_ini_path)); */
-        }
-    }
-
-    const char *errmsg = NULL;
+    /* const char *errmsg = NULL; */
 
     /* list opam dirs, to parameterize codept */
     /* opam_dirs = inventory_opam(); */
@@ -136,6 +77,7 @@ int main(int argc, char **argv) {
     linenoiseSetCompletionCallback(completion);
     linenoiseSetHintsCallback(hints);
 
+    //FIXME: put history in ~/.obazl.d
     /* Load history from file. The history file is just a plain text file
      * where entries are separated by newlines. */
     linenoiseHistoryLoad(history); /* Load the history at startup */
@@ -169,5 +111,45 @@ int main(int argc, char **argv) {
         }
         free(line);
     }
+}
+
+int main(int argc, char **argv)
+{
+    /* Parse options, with --multiline we enable multi line editing. */
+    int opt;
+    while ((opt = getopt(argc, argv, "dmkhvV")) != -1) {
+        switch (opt) {
+        case 'd':
+            debug = true;
+            break;
+        case 'm':
+            linenoiseSetMultiLine(1);
+            printf("Multi-line mode enabled.\n");
+            break;
+        case 'k':
+            linenoisePrintKeyCodes();
+            exit(0);
+            break;
+        case 'h':
+            print_usage();
+            exit(EXIT_SUCCESS);
+            break;
+        case 'v':
+            verbose =true;
+            break;
+        case 'V':
+            printf("Version: 1.0\n");
+            break;
+        default:
+            print_usage();
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    /* initializes s7 */
+    obazl_configure(getcwd(NULL, 0));
+
+    xen_repl(argc, argv);
+
     return 0;
 }

@@ -136,25 +136,25 @@ bool is_sigfile(char *fname)
     else return false;
 }
 
-//FIXME: switch from popen to posix_spawn
-char *run_cmd(char *cmd)
-{
-    static char buf[BUFSIZ];
-    FILE *fp;
+/* //FIXME: switch from popen to posix_spawn */
+/* char *run_cmd(char *cmd) */
+/* { */
+/*     static char buf[BUFSIZ]; */
+/*     FILE *fp; */
 
-    if ((fp = popen(cmd, "r")) == NULL) {
-        printf("Error opening pipe!\n");
-        return NULL;
-    }
+/*     if ((fp = popen(cmd, "r")) == NULL) { */
+/*         printf("Error opening pipe!\n"); */
+/*         return NULL; */
+/*     } */
 
-    while (fgets(buf, sizeof buf, fp) != NULL) {
-        /* printf("SWITCH: %s\n", buf); */
-        buf[strcspn(buf, "\n")] = 0;
-    }
+/*     while (fgets(buf, sizeof buf, fp) != NULL) { */
+/*         /\* printf("SWITCH: %s\n", buf); *\/ */
+/*         buf[strcspn(buf, "\n")] = 0; */
+/*     } */
 
-    if(pclose(fp))  {
-        printf("Command not found or exited with error status\n");
-        return NULL;
-    }
-    return buf;
-}
+/*     if(pclose(fp))  { */
+/*         printf("Command not found or exited with error status\n"); */
+/*         return NULL; */
+/*     } */
+/*     return buf; */
+/* } */

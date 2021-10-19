@@ -32,88 +32,6 @@
 int errnum;
 int rc;
 
-EXPORT void run_codept(char *codept_args_file, char *codept_deps_file)
-{
-    log_debug("running codept");
-
-    rc = chdir(utstring_body(proj_root));
-    if (rc) {
-        perror("chdir");
-        log_fatal("Unable to chdir to projroot %", utstring_body(proj_root));
-        exit(EXIT_FAILURE);
-    }
-
-    char cmd[PATH_MAX];
-    sprintf(cmd, "codept -verbosity info -k -args %s 2> /dev/null", codept_args_file);
-
-    bool keep = true;        /* ??? */
-
-    /* FILE *deps_fp; */
-    /* if (keep) { */
-    /*     printf("keeping %s\n", codept_deps_file); */
-    /*     deps_fp = fopen(codept_deps_file, "w"); */
-    /*     if (deps_fp == NULL) { */
-    /*         perror(codept_deps_file); */
-    /*         log_fatal("FAIL: run_codept fopen(%s, 'w')", codept_deps_file); */
-    /*         exit(EXIT_FAILURE); */
-    /*     } */
-    /* } */
-    /* log_debug("opened codept_deps_file %s for writing", codept_deps_file); */
-
-    /* log_debug("codept_args_file: %s", codept_args_file); */
-    /* log_debug("codept_deps_file: %s", codept_deps_file); */
-
-    pid_t pid;
-    int rc;
-    char *argv[] = {
-        "codept",
-        "-args", codept_args_file,
-        NULL};
-    extern char **environ;
-
-    /* FIXME: write stderr to log instead of dev/null? */
-    int DEVNULL_FILENO = open("/dev/null", O_WRONLY);
-    posix_spawn_file_actions_t action;
-    posix_spawn_file_actions_init(&action);
-    posix_spawn_file_actions_addopen (&action, STDOUT_FILENO, codept_deps_file,
-                                      O_WRONLY | O_CREAT | O_TRUNC,
-                                      S_IRUSR | S_IWUSR | S_IRGRP );
-    if (rc = posix_spawn_file_actions_adddup2(&action,
-                                              DEVNULL_FILENO,
-                                              STDERR_FILENO)) {
-        perror("posix_spawn_file_actions_adddup2");
-        posix_spawn_file_actions_destroy(&action);
-        exit(rc);
-    }
-
-    // FIXME: get absolute path of codept
-    // FIXME: restrict environ
-
-    char *codept_cmd = "/Users/gar/.opam/4.10/bin/codept";
-    log_debug("spawning %s", codept_cmd);
-    rc = posix_spawn(&pid, codept_cmd, &action, NULL, argv, environ);
-
-    if (rc == 0) {
-        /* log_debug("posix_spawn child pid: %i\n", pid); */
-        if (waitpid(pid, &rc, 0) != -1) {
-            if (rc) {
-                log_error("codept rc: %d", rc);
-                posix_spawn_file_actions_destroy(&action);
-            } else {
-                return;         /* success */
-            }
-        } else {
-            perror("waitpid");
-            log_error("run_codept posix_spawn");
-        }
-    } else {
-        /* does not set errno */
-        log_fatal("run_codept posix_spawn error rc: %d, %s", rc, strerror(rc));
-    }
-    posix_spawn_file_actions_destroy(&action);
-    exit(EXIT_FAILURE);
-}
-
 /* do not use, use the c fn */
 EXPORT void gen_codept_argsfile(char *_rootdir, UT_array *_subdirs)
 {
@@ -156,7 +74,7 @@ EXPORT void run_ocamlark_handler(char *_depsfile)
     s7_pointer args =  s7_list(s7, 1, depsfile);
 
     s7_pointer result = s7_call(s7,
-                                s7_name_to_value(s7, "ocamlark-handler"),
+                                s7_name_to_value(s7, "camlark-handler"),
                                 args);
     errmsg = s7_get_output_string(s7, s7_current_error_port(s7));
     if ((errmsg) && (*errmsg)) {

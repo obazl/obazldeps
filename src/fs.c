@@ -816,7 +816,7 @@ int fileseq_impl(char* rel_dir, UT_array *files)
 {
     /* log_debug("fileseq_impl rootdir: %s, reldir: %s", root_dir, rel_dir); */
 
-    static curr_dir[PATH_MAX];
+    static char curr_dir[PATH_MAX];
     memset(curr_dir, '\0', PATH_MAX);
     strncat(curr_dir, root_dir, strlen(root_dir));
     strncat(curr_dir, "/", 1);

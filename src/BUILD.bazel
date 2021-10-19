@@ -8,25 +8,27 @@ cc_library(
     # alwayslink = True,
     linkstatic = 1,
     srcs  = [
-        "codept.c",
-        "codept.h",
-        "codept_emit.c",
-        "codept_emit.h",
-        "codept_parser.c",
-        "codept_parser.h",
+        "cmd_runner.c",
+        "cmd_runner.h",
+        # "codept.c",
+        # "codept.h",
+        # "codept_emit.c",
+        # "codept_emit.h",
+        # "codept_parser.c",
+        # "codept_parser.h",
         "config.c",
         "config.h",
-        "fs.c",
-        "fs.h",
-        "utils.c",
-        "utils.h",
+        # "fs.c",
+        # "fs.h",
+        # "utils.c",
+        # "utils.h",
         "@uthash//:include",
     ],
-    data = [
-        "//scm:ocamlark.scm"
-    ],
+    # data = [
+    #     "//scm:camlark.scm"
+    # ],
     hdrs = [
-        "ocamlark.h"
+        "camlark.h"
     ],
     defines = select({
         "//bzl/host:debug": ["DEBUG_TRACE"],
@@ -36,7 +38,58 @@ cc_library(
         "-std=c11",
 
         "-I$(GENDIR)/src",
-        "-I$(GENDIR)/external/ocamlark/src",
+        "-I$(GENDIR)/external/camlark/src",
+
+        "-Iexternal/libs7/src",
+
+        "-Iexternal/uthash/include",
+        "-Iexternal/libinih",
+        "-Iexternal/logc/src"
+    ],
+    deps = [
+        "//external/libinih:inih",
+        "@libs7//src:s7",
+        "@logc//:logc",
+    ],
+    visibility = ["//visibility:public"]
+)
+
+cc_library(
+    name  = "config",
+    # alwayslink = True,
+    linkstatic = 1,
+    srcs  = [
+        # "cmd_runner.c",
+        # "cmd_runner.h",
+        # "codept.c",
+        # "codept.h",
+        # "codept_emit.c",
+        # "codept_emit.h",
+        # "codept_parser.c",
+        # "codept_parser.h",
+        "config.c",
+        "config.h",
+        # "fs.c",
+        # "fs.h",
+        # "utils.c",
+        # "utils.h",
+        "@uthash//:include",
+    ],
+    # data = [
+    #     "//scm:camlark.scm"
+    # ],
+    hdrs = [
+        "config.h"
+    ],
+    defines = select({
+        "//bzl/host:debug": ["DEBUG_TRACE"],
+        "//conditions:default":   []
+    }),
+    copts = [
+        "-std=c11",
+
+        "-I$(GENDIR)/src",
+        "-I$(GENDIR)/external/camlark/src",
 
         "-Iexternal/libs7/src",
 
@@ -56,6 +109,7 @@ cc_library(
 genrule(
     name = "mkhdrs",
     srcs = [
+        "cmd_runner.c",
         "codept.c",
         "codept_emit.c",
         "codept_parser.c",
@@ -64,6 +118,7 @@ genrule(
         "utils.c",
     ],
     outs = [
+        "cmd_runner.h",
         "codept.h",
         "codept_emit.h",
         "codept_parser.h",
@@ -75,6 +130,7 @@ genrule(
         "SRC1=$(location codept.c)",
         "SRCDIR1=`dirname $$SRC1`",
         "$(location @makeheaders//:makeheaders) \\",
+        "    $(location cmd_runner.c) \\",
         "    $(location codept.c) \\",
         "    $(location codept_emit.c) \\",
         "    $(location codept_parser.c) \\",
@@ -91,26 +147,30 @@ genrule(
 genrule(
     name = "mkhdrs-export",
     srcs = [
-        "codept.c",
-        "codept_emit.c",
-        "codept_parser.c",
+        "cmd_runner.c",
+        # "codept.c",
+        # "codept_emit.c",
+        # "codept_parser.c",
         "config.c",
-        "fs.c",
-        "utils.c",
+        # "fs.c",
+        # "utils.c",
+        "@uthash//:include",
     ],
     outs = [
-        "ocamlark.h",
+        "camlark.h",
     ],
     cmd = "\n".join([
-        "SRC1=$(location codept_emit.c)",
+        "SRC1=$(location config.c)",
         "SRCDIR1=`dirname $$SRC1`",
         "$(location @makeheaders//:makeheaders) -H \\",
-        "    $(location codept.c) \\",
-        "    $(location codept_emit.c) \\",
-        "    $(location codept_parser.c) \\",
+        "    $(locations @uthash//:include) \\",
+        "    $(location cmd_runner.c) \\",
+        # "    $(location codept.c) \\",
+        # "    $(location codept_emit.c) \\",
+        # "    $(location codept_parser.c) \\",
         "    $(location config.c) \\",
-        "    $(location fs.c) \\",
-        "    $(location utils.c) \\",
+        # "    $(location fs.c) \\",
+        # "    $(location utils.c) \\",
         "    > $@",
     ]),
     tools = ["@makeheaders//:makeheaders"],

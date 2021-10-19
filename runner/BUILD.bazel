@@ -17,10 +17,10 @@ cc_binary(
         "-pedantic-errors",
 
         "-I$(GENDIR)/src",
-        "-I$(GENDIR)/external/ocamlark/src",
+        "-I$(GENDIR)/external/camlark/src",
 
         "-I$(GENDIR)/runner",
-        "-I$(GENDIR)/external/ocamlark/runner",
+        "-I$(GENDIR)/external/camlark/runner",
 
         "-Iexternal/uthash/include",
         "-Iexternal/logc/src",

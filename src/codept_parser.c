@@ -38,7 +38,7 @@ EXPORT struct obazl_deps_s *obazl_deps_parse_file(char *fname)
         s7_quit(s7);
         exit(EXIT_FAILURE);
     }
-    s7_pointer fn = s7_name_to_value(s7, "read");
+
     s7_pointer obj = s7_read(s7, port);
     errmsg = s7_get_output_string(s7, s7_current_error_port(s7));
     if ((errmsg) && (*errmsg)) {
