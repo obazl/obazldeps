@@ -551,13 +551,13 @@ If func approves of one, index-if returns the index that gives that element's po
 ;;;
 ;;; to return (f arg) rather than arg, (apply type (map f sequence))
 
-;; (define remove-if
-;;   (let ((+documentation+ "(remove-if type f sequence) returns via type the elements of sequence that do not satisfy func:\n\
-;;     (remove-if list integer? #(1.4 2/3 1 1+i 2)) -> '(1.4 2/3 1+1i)"))
-;;     (lambda (type f sequence)
-;;       (unless (sequence? sequence)
-;; 	(error 'wrong-type-arg "remove-if: sequence arg is ~A" sequence))
-;;       (collect-if type (lambda (obj) (not (f obj))) sequence))))
+(define remove-if
+  (let ((+documentation+ "(remove-if type f sequence) returns via type the elements of sequence that do not satisfy func:\n\
+    (remove-if list integer? #(1.4 2/3 1 1+i 2)) -> '(1.4 2/3 1+1i)"))
+    (lambda (type f sequence)
+      (unless (sequence? sequence)
+	(error 'wrong-type-arg "remove-if: sequence arg is ~A" sequence))
+      (collect-if type (lambda (obj) (not (f obj))) sequence))))
 
 (define nonce
   (let ((+documentation+ "(nonce type sequence) returns via type the elements of sequence that occur only once"))
