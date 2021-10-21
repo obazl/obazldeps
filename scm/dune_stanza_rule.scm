@@ -84,7 +84,7 @@
 ;; (rule (target[s] <filenames>) (action  <action>) <optional-fields>)
 ;; q: can a rule stanza have multiple actions?
 (define (normalize-stanza-rule pkg-path srcfiles stanza)
-  (format #t "\nNORMALIZE-STANZA-RULE: ~A\n" pkg-path)
+  ;; (format #t "\nNORMALIZE-STANZA-RULE: ~A\n" pkg-path)
 
   ;; for other stanza types we can normalize fields in isolation. For
   ;; 'rule' stanzas, we need a higher level of analysis, so we cannot

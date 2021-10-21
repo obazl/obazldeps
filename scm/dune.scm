@@ -85,7 +85,7 @@
         (else (-dune-filter (cdr lst)))))
 
 (define (process-dune-includes path includes stanzas)
-  (format #t "process-dune-includes ~A: ~A\n" path includes)
+  ;; (format #t "process-dune-includes ~A: ~A\n" path includes)
   (apply append (map (lambda (include)
                       (let ((inc (cadr include)))
                         ;; (format #t "including: ~A\n" inc)
@@ -175,10 +175,10 @@
     (let ((includes (assoc+ 'include stanzas))
           (stripped (alist-delete '(include) stanzas)))
       ;; (format #t "EMBEDDED INCS: ~A\n" includes)
-      (if (not (null? includes))
-          (begin
-            (format #t "INCS: ~A\n" includes)
-            (format #t "STRIPPED: ~A\n" stripped)))
+      ;; (if (not (null? includes))
+      ;;     (begin
+      ;;       (format #t "INCS: ~A\n" includes)
+      ;;       (format #t "STRIPPED: ~A\n" stripped)))
       (if (null? includes)
           ;; (if dune-project-stanzas
           ;;     (cons `(:dune-project ,dune-project-stanzas) stanzas)
@@ -358,60 +358,79 @@
   ;; return updated pkg table
     pkg-tbl))
 
-(define (pkg-stanzas->public-names-table! stanzas pname-tbl)
-  ;; (format #t "pkg-stanzas->public-names-table! ~A\n" stanzas)
+(define (pkg-stanzas->public-names-table! pkg-path stanzas pname-tbl)
+  ;; (format #t "pkg-stanzas->public-names-table! ~A\n ~A\n"
+  ;;         pkg-path stanzas)
   (for-each
    (lambda (stanza)
      ;; stanza:: (<stanza-type> <alist>)
-     (format #t "STANZA: ~A\n" (car stanza))
+     ;; (format #t "STANZA: ~A\n" (car stanza))
      (let* ((stanza-alist (cadr stanza)))
        ;; stanza-alist: (<assoc> <assoc> ...)
        (case (car stanza)
          ((:library)
-          (let ((modname (assoc-in '(:name :module) stanza-alist))
-                (privname (assoc-in '(:name :private) stanza-alist))
-                (pubname (assoc :public_name stanza-alist)))
-            (format #t "    modname: ~A\n" modname)
-            (format #t "    privname: ~A\n" privname)
-            (format #t "    pubname: ~A\n" pubname)
-            (if (and privname pubname)
-                (begin
-                  (hash-table-set! pname-tbl
-                                   (cadr privname)
-                                   (cadr pubname))
-                  (hash-table-set! pname-tbl
-                                   (cadr pubname)
-                                   (cadr privname))
-                  ))
-            (if (and pubname modname)
-                (begin
-                  (hash-table-set! pname-tbl
-                                   (cadr pubname)
-                                   (cadr modname))
-                  (hash-table-set! pname-tbl
-                                   (cadr modname)
-                                   (cadr pubname))))))
-         ((:executable)
-          (begin
-            (format #t "executable->pnt: ~A\n" stanza)
-            ))
-         ((rule) ) ;; skip
+          (let* (;;(modname (assoc-in '(:name :module) stanza-alist))
+                 (privname (assoc-in '(:name :private) stanza-alist))
+                 (pubname (assoc-in  '(:name :public) stanza-alist))
+                 (label (string-append
+                         "//" pkg-path ":"
+                         (if pubname
+                             (symbol->string (cadr pubname))
+                             (symbol->string (cadr privname)))))
+
+                 (entry (if (and privname pubname)
+                            `((:privname ,(cadr privname))
+                              (:pubname ,(cadr pubname))
+                              (:label ,label))
+                            ;; else privname only
+                            `((:privname ,(cadr privname))
+                              (:label ,label)))))
+            ;; (format #t "    modname: ~A\n" modname)
+            ;; (format #t "    privname: ~A\n" privname)
+            ;; (format #t "    pubname: ~A\n" pubname)
+
+            ;; we always have a privname?
+            (hash-table-set! pname-tbl (cadr privname) entry)
+
+            (if pubname
+                (hash-table-set! pname-tbl (cadr pubname) entry))
+
+            ;; (begin
+            ;;   (hash-table-set! pname-tbl
+            ;;                    (cadr pubname)
+            ;;                    entry)
+            ;;   ;; (cadr modname))
+            ;;   (hash-table-set! pname-tbl
+            ;;                    (cadr modname)
+            ;;                    entry)
+            ;;   ;; (cadr pubname))
+            ;;   )
+                ))
+         ;; ((:executable)
+         ;;  (begin
+         ;;    (format #t "executable->pnt: ~A\n" stanza)
+         ;;    ))
+         ;; ((rule) ) ;; skip
        (else
         ;; skip
         ))))
      (cadr stanzas)))
 
+;; initialize names lookup table. maps names to names and label, e.g.
+;; private-name to public-name, public-name to bazel target label.
+;; used by e.g. lib 'select' LHS resolution.
+;; FIXME: better names
 (define (libdeps->public-names-table dune-pkg-tbls)
   (let ((pname-tbl (make-hash-table)))
     (for-each (lambda (pkg-tbl)
-                (format #t "PKG-TBL: ~A\n" (car pkg-tbl))
+                ;;(format #t "PKG-TBL: ~A\n" (car pkg-tbl))
                 ;; pkg-tbl: (<dir-path> <pkg hash-tbl>) i.e. assoc pair
                 (for-each (lambda (pkg)
                             ;; pkg: (<pkg-path> <pkg-list>)
-                            (format #t "PKG: ~A\n" (car pkg))
+                            ;;(format #t "PKG: ~A\n" (car pkg))
                             (if-let ((stanzas (assoc :stanzas (cdr pkg))))
-
                                     (pkg-stanzas->public-names-table!
+                                     (car pkg)
                                      stanzas pname-tbl)
 
                                     ;; else skip - pkg w/o dune stanzas
@@ -421,162 +440,5 @@
     pname-tbl))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(define (update-modtbl-null stanza)
-  stanza)
 
-(define (update-modtbl-executable path modules-tbl stanza)
-  (format #t "update-modtbl-executable: ~A\n ~A\n" path stanza)
-  ;; (assoc :name (cadr stanza)))
-  (let* ((stanza (cadr stanza))
-         (module-name (assoc-in '(:name :module) stanza))
-         (private-name (assoc-in '(:name :private) stanza))
-         (pubname (assoc-in '(:name :public) stanza))
-         (pubname (assoc :public_name stanza))
-         (key (if pubname (cadr pubname) (cadr private-name))))
-    ;; stanza: (<assoc> <assoc> ...)
-    (format #t "    modname: ~A\n" module-name)
-    (format #t "    privname: ~A\n" private-name)
-    (format #t "    pubname: ~A\n" pubname)
-    (format #t "    key: ~A\n" key)
-    (hash-table-set! modules-tbl
-                     key
-                     `((:exe)
-                       (:path ,path)))))
-
-(define (update-modtbl-executables path modules-tbl stanza)
-  ;; (format #t "update-modtbl-executables: ~A\n" (assoc :names (cadr stanza)))
-  (let* ((stanza (cadr stanza))
-         (names (assoc :names stanza))
-         (pnames (assoc :public_names stanza)))
-    ;; stanza: (<assoc> <assoc> ...)
-    ;; (format #t "dune->modules-tbl NAMES: ~A\n" names)
-    ;; (format #t "dune->modules-tbl PNAMES: ~A\n" pnames)
-    (for-each (lambda (name)
-                (if-let ((entry (hash-table-ref modules-tbl name)))
-                        ;; update
-                        (hash-table-set! modules-tbl
-                                         name
-                                         ;;stanza
-                                         `((:exe)
-                                           (:path ,path)))
-                        (hash-table-set! modules-tbl
-                                         name
-                                         ;;stanza
-                                         `((:exe)
-                                           (:path ,path)))
-                        ))
-              (cadr names))))
-
-(define (update-modtbl-library modules-tbl path stanza)
-  ;; (format #t "update-modtbl-library: ~A\n" (assoc :name (cadr stanza)))
-    ;; stanza: (<assoc> <assoc> ...)
-  (let* ((stanza (cadr stanza))
-         (name (assoc :name stanza))
-         (raw-name (cadr (assoc-in '(:name :private) stanza)))
-         (mod-name (cadr (assoc-in '(:name :module) stanza)))
-         (pub-name (if-let ((pname (assoc :public_name stanza)))
-                          (cadr pname) #f))
-         (wrapped? (if-let ((wrapped (assoc :wrapped stanza)))
-                           (if (equal? wrapped 'false) #f #t)
-                           #t))
-         (opts (assoc :opts stanza))
-         (submodules (assoc :submodules stanza))
-         (deps    (assoc :deps    stanza)))
-    (if-let ((entry (hash-table-ref modules-tbl mod-name)))
-            (begin
-              (format #t "DUP: ~A\n" mod-name)
-              (hash-table-set! modules-tbl mod-name
-                               (append entry '(:dup))))
-            ;; else new entry
-            (hash-table-set! modules-tbl mod-name
-                             (list
-                              `(:name
-                                ((:private    . ,raw-name)
-                                 (:module . ,mod-name)
-                                 (:public . ,pub-name)))
-                              `(:path ,path)
-                              '(:aggregate)
-                              (if-let ((wrapped (assoc 'wrapped stanza)))
-                                      (if (equal? 'false (cadr wrapped))
-                                          '(:library)
-                                          '(:ns-archive))
-                                      '(:ns-archive))
-                              opts
-                              `(:submodules ,@(cdr submodules))
-                              deps)))))
-
-(define (dune->modules-tbl pkg-tbls-list codept-sexp)
-  (let ((modules-tbl (make-hash-table)))
-    (for-each
-     (lambda (pkg-tbl)
-       ;; (format #t "PKG-TBL: ~A\n" pkg-tbl)
-       ;; pkg-tbl: (<dir-path> <pkg hash-tbl>) i.e. assoc pair
-       (for-each
-        (lambda (pkg)
-          ;; (format #t "PKG path: ~A\n" (car pkg))
-          ;; pkg: (<pkg-path> list of assocs)
-          ;; (cdr pkg) : pkg-alist
-          (if-let ((stanzas (assoc :stanzas (cdr pkg))))
-                  (begin
-                    ;; (format #t "STANZAS: ~A\n" "X") ;stanzas)
-                    (for-each
-                     (lambda (stanza)
-                       ;; stanza-pair, e.g. (library <alist>)
-                       (case (car stanza)
-                         ((alias) (update-modtbl-null stanza))
-                         ((copy_files) (update-modtbl-null stanza))
-                         ((data_only_dirs) (update-modtbl-null stanza))
-                         ((env) (update-modtbl-null stanza))
-                         ((:executable) (update-modtbl-executable
-                                         (car pkg) ;; path
-                                         modules-tbl stanza))
-                         ((:executables) (update-modtbl-executables
-                                          (car pkg) ;; path
-                                          modules-tbl stanza))
-                         ((install) (update-modtbl-null stanza))
-                         ((:library) (update-modtbl-library
-                                     modules-tbl
-                                     (car pkg) ;; pkg-path
-                                     stanza))
-                         ((ocamllex) (update-modtbl-null stanza))
-                         ((rule) (update-modtbl-null stanza))
-                         ((test) (update-modtbl-null stanza))
-                         ((tests) (update-modtbl-null stanza))
-
-                         ((:genrule)) ;; skip
-                         ((:write-file)) ;; skip
-                         (else
-                          (format #t "dune->modules-tbl unhandled: ~A\n" stanza))))
-                     (cadr stanzas)))
-                  ;; else skip - pkg w/o dune stanzas
-                  ;;(format #t "NO STANZAS: ~A\n" (car pkg))
-                  ))
-        (cadr pkg-tbl)))
-     pkg-tbls-list)
-    modules-tbl))
-
-(define (dump-stanzas pkgs-tbl)
-  (for-each (lambda (kv)
-              ;; (display (format #f "fs-path: ~A" (car kv)))
-              ;; (newline)
-              ;; (display (format #f "k: ~A, v: ~A" (car kv) (cdr kv)))
-              ;; (newline)
-              ;; (display (format #f " stanzas: ~A"
-              ;;                  (assoc :stanzas (cdr kv))))
-              ;; (newline)
-              (let ((stanzas (cdr (assoc :stanzas (cdr kv)))))
-                (display (format #f " libraries: ~A"
-                                 (assoc+ :library stanzas)))
-                (newline)
-                (display (format #f " executable: ~A"
-                                 (assoc+ :executable stanzas)))
-                (newline)
-                (display (format #f " executables: ~A"
-                                 (assoc+ :executables stanzas)))
-                (newline)
-                (display (format #f " alias: ~A"
-                                 (assoc+ :alias stanzas)))
-                (newline)))
-            pkgs-tbl)
-  '())
 

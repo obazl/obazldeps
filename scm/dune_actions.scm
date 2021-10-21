@@ -119,7 +119,7 @@
 ;; )))
 
 (define (normalize-write-file action stanza) ;; action target targets deps)
-  (format #t "  Action: write-file ~A\n" action)
+  ;; (format #t "  Action: write-file ~A\n" action)
 
   ;; CAVEAT: a write-file action may have 'deps or other fields, which
   ;; are not necessarily included in the out string.
@@ -208,7 +208,7 @@
       (values #f #f #f #f #f #f)))
 
 (define (normalize-cmd-dsl dsl depvars)
-  (format #t "normalize-cmd-dsl: ~A\n" dsl)
+  ;; (format #t "normalize-cmd-dsl: ~A\n" dsl)
   (if (null? dsl)
       '()
       (if (pair? (car dsl))
@@ -227,7 +227,7 @@
 
 ;; (with-<outputs>-to <file> <DSL>), <outputs>= stdout | stderr | outputs
 (define (normalize-with-stdout-to action stanza) ;;target targets deps)
-  (format #t "  Action: with-stdout-to ~A\n" action)
+  ;; (format #t "  Action: with-stdout-to ~A\n" action)
 
   ;; FIXME: if 'targets' is a list the following won't work
   (let* ((file (cadadr action))
@@ -245,24 +245,24 @@
                             file)))))
     (let-values (((filedeps depvars env-vars universe aliases unresolved)
                   (expand-deps (assoc 'deps rule-alist))))
-      (format #t "filedeps: ~A\n" filedeps)
-      (format #t "depvars: ~A\n" depvars)
-      (format #t "env-vars: ~A\n" env-vars)
-      (format #t "universe: ~A\n" universe)
-      (format #t "aliases: ~A\n" aliases)
-      (format #t "unresolved: ~A\n" unresolved)
+      ;; (format #t "filedeps: ~A\n" filedeps)
+      ;; (format #t "depvars: ~A\n" depvars)
+      ;; (format #t "env-vars: ~A\n" env-vars)
+      ;; (format #t "universe: ~A\n" universe)
+      ;; (format #t "aliases: ~A\n" aliases)
+      ;; (format #t "unresolved: ~A\n" unresolved)
 
       (let ((cmd (normalize-cmd-dsl dsl depvars)))
-        (format #t "cmd: ~A\n" cmd)
+        ;; (format #t "cmd: ~A\n" cmd)
 
-    ;; (format #t "DSL: ~A\n" dsl)
+        ;; (format #t "DSL: ~A\n" dsl)
 
-    `(:with-stdout-to
-      (:out ,outfile)
-      (:cmd ,cmd)
-      (:depvars ,depvars)
-      ,(if filedeps `(:filedeps ,@(cdr filedeps)) '())
-      (:raw ,stanza))))))
+        `(:with-stdout-to
+          (:out ,outfile)
+          (:cmd ,cmd)
+          (:depvars ,depvars)
+          ,(if filedeps `(:filedeps ,@(cdr filedeps)) '())
+          (:raw ,stanza))))))
 
   ;; (let ((result
   ;;        (let recur ((tokens (cdadr action)))
@@ -286,8 +286,8 @@
   ;;   %{libexec:tezos-protocol-compiler:final_protocol_versions})))
 
 (define (normalize-run-stanza action stanza)
-  (format #t "  Action: run ~A\n" action)
-  (format #t "  stanza: ~A\n" stanza)
+  ;; (format #t "  Action: run ~A\n" action)
+  ;; (format #t "  stanza: ~A\n" stanza)
 
   ;; (let* ((prog (cadadr action))
   ;;        (rule-alist (cdr stanza))
@@ -343,11 +343,11 @@
 
   (cond
    ((eq? 'progn (cadr action)) ;; (action progn)
-    (format #t "    progn: simple\n")
+    ;; (format #t "    progn: simple\n")
     stanza)
 
    ((equal? '(progn) (cadr action)) ;; (action (progn)) - null action?
-    (format #t "  Action: empty progn\n")
+    ;; (format #t "  Action: empty progn\n")
     ;; this is a null action. used with alias, to force build of deps?
     ;; usually alias is 'runtest'?
     ;; but dune "aliases" like runtest are group names, not true aliases.
@@ -360,27 +360,28 @@
     ;;       (action (progn)))
 
     ;; verify we also have an alias:
-    (let* ((rule-alist (cdr stanza))
-           (alias (assoc 'alias rule-alist)))
-      ;; aliases used by tezos: runtest, buildtest
-      (if alias
-          (format #t "    progn alias: ~A\n" alias)
-          (format #t "    progn w/o alias: ~A\n" stanza)))
+    ;; (let* ((rule-alist (cdr stanza))
+    ;;        (alias (assoc 'alias rule-alist)))
+    ;;   ;; aliases used by tezos: runtest, buildtest
+    ;;   (if alias
+    ;;       (format #t "    progn alias: ~A\n" alias)
+    ;;       (format #t "    progn w/o alias: ~A\n" stanza))
+    ;;   )
     stanza)
 
    (else ;; (action (progn ...))
-    (format #t "    progn: compound\n")
+    ;; (format #t "    progn: compound\n")
     stanza)))
 
 (define (normalize-action action stanza) ;; action target targets deps)
-  (format #t "  Normalizing action: ~A\n" action)
+  ;; (format #t "  Normalizing action: ~A\n" action)
 
   (let ((key (if (pair? (cadr action))
                  ;; e.g. (action (run ...)), (action (progn))
                  (caadr action)
                  ;; e.g. (action progn)
                  (cadr action))))
-    (format #t "  action key: ~A\n" key)
+    ;; (format #t "  action key: ~A\n" key)
     (case key  ;; (car action)
       ((run) (normalize-run-stanza action stanza))
 

@@ -46,7 +46,7 @@
 ;; for dune, the 'public_name' field means "install to system /bin
 ;; under this name".  for obazl we do not install anything.
 (define (codept-emit-exec-args fs-path stanza srcfiles out-port)
-  ;; (display (format #f "codept-emit-exec-args ~A" stanza)) (newline)
+  (format #t "codept-emit-exec-args ~A: ~A\n" fs-path stanza)
   (let* ((nm (cadr (assoc :name (cadr stanza))))
          ;; (public_nm (if-let ((pn (assoc 'public_name (cdr stanza))))
          ;;                    (cadr pn)
@@ -103,7 +103,7 @@
   )
 
 (define (codept-emit-executable-args fs-path exec-stanzas srcfiles out-port)
-  ;; (display (format #f "codept-emit-executable-args fs-path: ~A" fs-path))
+ (format #t "codept-emit-executable-args fs-path: ~A\n" fs-path)
   ;; (newline)
   ;; (display (format #f "codept-emit-executable-args exec-stanzas: ~A" exec-stanzas))
   ;; (newline)
@@ -170,7 +170,7 @@
 
         ;; else we have an explicit '(modules ...)' list
         (begin
-          (display (format #f "MODULES for executables stanza: ~A\n" modules))
+          ;; (display (format #f "MODULES for executables stanza: ~A\n" modules))
           (for-each (lambda (module)
                     (if (pair? module)
                         (format outport "FIXME: ~A\n" module)
@@ -207,27 +207,23 @@
 ;; install (and elsewhere use) an executable in the system
 ;; <prefix>/libexec dir.
 (define (codept-emit-lib-args fs-path stanza srcfiles out-port)
-  ;; srcfiles: (:ocaml ("foo.ml" ...))
-
-  ;; (format #t "CODEPT path: ~A\n" fs-path)
+  (format #t "codept-emit-lib-args: ~A\n" fs-path)
+  ;; (format #t "    stanza: ~A\n" stanza)
   ;; (let ((modules (assoc-in '(:modules :direct) (cadr stanza))))
   ;;   (format #t "  Stanza: ~A\n" stanza)
   ;;   (format #t "  Modules: ~A\n" modules))
 
-  (if (equal? fs-path "src/lib_protocol_environment/sigs")
-      (format #t " SIGS stanza: ~A\n" stanza))
+  ;; (if (equal? fs-path "src/lib_protocol_environment/sigs")
+  ;;     (format #t " SIGS stanza: ~A\n" stanza))
 
-  (let* ((ocaml-srcs (if-let ((ocaml-srcs (assoc :ocaml srcfiles)))
-                             (cadr ocaml-srcs)
-                             '()))
+  (let* ((stanza-alist (cadr stanza))
+         (ocaml-srcs (if srcfiles srcfiles '()))
+         ;; (ocaml-srcs (if-let ((ocaml-srcs (assoc :ocaml srcfiles)))
+         ;;                     (cadr ocaml-srcs)
+         ;;                     '()))
          ;; (_ (format #t "Srcs: ~A\n" srcfiles))
 
-         (nm  (cadr (assoc-in '(:name :module) (cadr stanza))))
-         ;; (_ (format #t "NM: ~A\n" nm))
-         ;; normalized name fld: (raw . normalized),
-         ;; e.g. (numerics . "Numerics")
-         ;; (nm (cdr nm))
-         ;; (public_nm (cadr (assoc 'public_name (cdr stanza))))
+         (privname  (cadr (assoc-in '(:name :private) stanza-alist)))
 
          ;; root_module? - a generated resolver module, so no deps
 
@@ -255,7 +251,7 @@
                          (begin
                            (display
                             (format #f "WARNING: empty library: ~A:~A"
-                                    fs-path nm)) (newline)
+                                    fs-path privname)) (newline)
                             '())
                          (cadr direct-modules))
                      '()))
@@ -281,8 +277,8 @@
               ;; (display (format #f "MODS: :standard (implicit)")) (newline)
               ;; (display (format #f "SRCS: ~A" srcfiles)) (newline)
 
-              ;; (format out-port "-open\n~A\n" nm)
-              (format out-port "~A[" nm)
+              ;; (format out-port "-open\n~A\n" privname)
+              (format out-port "~A[" privname)
               (for-each (lambda (f)
                           ;; if f not in modules_without_implementation?
                           (format out-port "~A"
@@ -303,8 +299,8 @@
           ;; "". since the file is not generated yet, we can go ahead
           ;; and emit "".
 
-          ;; (format out-port "-open\n~A\n" nm)
-          (format out-port "~A[" nm)
+          ;; (format out-port "-open\n~A\n" privname)
+          (format out-port "~A[" privname)
           (for-each (lambda (m)
                       ;; (format #t "M: ~A\n" m)
                       ;; (format #t "path: ~A\n"
@@ -338,9 +334,9 @@
           (newline out-port))
         )
 
-    ;; (display (format out-port "   ns: ~A" nm))
+    ;; (display (format out-port "   ns: ~A" privname))
     ;; (newline out-port)
-    ;; (display (format out-port "   public_name: ~A" public_nm))
+    ;; (display (format out-port "   public_name: ~A" public_privname))
     ;; (newline out-port)
     ;; (display (format #f "   modules: ~A" modules))
     ;; (newline)
@@ -355,9 +351,11 @@
   ;; (newline)
   (if (not (null? lib-stanzas))
       ;; only emit args for srcfiles
-      (if (assoc :ocaml srcfiles)
-        (for-each (lambda (stanza)
-                    (codept-emit-lib-args fs-path stanza srcfiles out-port))
+      ;; (if-let ((srcs (assoc :ocaml srcfiles)))
+      (if srcfiles
+          (for-each (lambda (stanza)
+                      (codept-emit-lib-args fs-path stanza
+                                            srcfiles out-port))
                   lib-stanzas)
         )
         )
@@ -379,9 +377,11 @@
           ;;     (format #t " stanzas: ~A\n" stanzas-assoc))
           (if stanzas-assoc ;; assoc returns #f if not found
               (let ((stanzas (cadr stanzas-assoc))
-                    (srcfiles (if-let ((srcs (assoc :srcfiles (cdr pkg-kv))))
-                                 (cadr srcs)
-                                 '()))
+                    (srcfiles (if-let ((srcs
+                                        (assoc-in '(:srcfiles :ocaml)
+                                                  (cdr pkg-kv))))
+                                      (cadr srcs)
+                                      '()))
                     )
           ;; (display (format #f "PATH: ~A" fs-path))
           ;; (newline)
@@ -400,7 +400,8 @@
             (if (not (null? lib-stanzas))
                 (codept-emit-library-args fs-path lib-stanzas srcfiles out-port)))
 
-          (let ((exec-stanzas (assoc+ 'executable stanzas)))
+          (let ((exec-stanzas (assoc+ :executable stanzas)))
+            ;; (format #t "ASSOC+ execs: ~A\n" exec-stanzas)
             (if (not (null? exec-stanzas))
                 (begin
                   (codept-emit-executable-args fs-path exec-stanzas srcfiles out-port))))

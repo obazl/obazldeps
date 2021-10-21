@@ -5,10 +5,26 @@
 
 ;;fld: (name tezos_sapling)
 ;; FIXME: remove
-(define (normalize-stanza-fld-name fld) ;; DEPRECATED
-  ;; (format #t "normalize-stanza-fld-name ~A\n" fld)
-  `(:name ((:private ,fld)
-           (:module ,(normalize-module-name fld)))))
+(define (normalize-stanza-fld-name pkg-path privname stanza-alist)
+  ;; (format #t "normalize-stanza-fld-name ~A\n" privname)
+  ;; (format #t "    stanza-alist: ~A\n" stanza-alist)
+  (let ((pubname (assoc 'public_name stanza-alist)))
+    (if pubname
+        (begin
+          ;; (update-public-exe-table pkg-path
+          ;;                          (cadr pubname)
+          ;;                          (cadr pubname))
+          ;; (update-public-exe-table pkg-path
+          ;;                          (cadr privname)
+          ;;                          (cadr pubname))
+          `(:name ((:private ,(cadr privname))
+                   (:public ,(cadr pubname)))))
+        (begin
+          ;; (update-public-exe-table pkg-path (cadr privname)
+          ;;                          (cadr privname))
+          `(:name ((:private ,(cadr privname))))))))
+  ;; `(:name ((:private ,fld)
+  ;;          (:module ,(normalize-module-name fld)))))
 
 (define (normalize-stanza-fld-names fld)
   ;; (format #t "normalize-stanza-fld-names ~A\n" fld)
@@ -66,20 +82,20 @@
   (let-values (((directs selects modules) (analyze-libdeps fld)))
     (list :deps
           (list (list :raw fld)
-                (list :selects (reverse selects))
+                (list :contingent (reverse selects))
                 ;;(list :modules (reverse modules))
-                (list :libs (reverse directs))))))
+                (list :constant (reverse directs))))))
 
 ;; (modules Registerer), (modules (:standard \ legacy_store_builder))
 ;; (modules)
 ;; (modules (:standard (symbol "\\") delegate_commands delegate_commands_registration))
-(define (normalize-stanza-fld-modules fld)
-  (format #t "normalize-stanza-fld-modules: ~A\n" fld)
-  ;; (cons 'modules
-  ;;       (if (list? (cadr fld))
-  ;;           (cdr fld)
-  ;;           (list (cdr fld)))))
-  fld)
+;; (define (normalize-stanza-fld-modules fld)
+;;   ;; (format #t "normalize-stanza-fld-modules: ~A\n" fld)
+;;   ;; (cons 'modules
+;;   ;;       (if (list? (cadr fld))
+;;   ;;           (cdr fld)
+;;   ;;           (list (cdr fld)))))
+;;   fld)
 
 ;; e.g. (cdr (:standard (symbol "\\") legacy_store_builder))
 (define (srcs->module-names srcfiles seq)
@@ -191,58 +207,98 @@
 (define (normalize-open opener)
   ;; truncate at '__', e.g. Tezos_base__TzPervasives => Tezos_base
   ;; why? whatever the submod depends on will be listed in its aggregator
+  ;; (let ((ostr (symbol->string opener)))
+  ;;   (if-let ((trunc-at (string-contains ostr "__")))
+  ;;           (let ((result (string-take ostr trunc-at)))
+  ;;             ;; (format #t "NORMED ~A => ~A\n" ostr result)
+  ;;             result)
+  ;;           ostr))
+  opener)
 
-  (let ((ostr (symbol->string opener)))
-    (if-let ((trunc-at (string-contains ostr "__")))
-            (let ((result (string-take ostr trunc-at)))
-              ;; (format #t "NORMED ~A => ~A\n" ostr result)
-              result)
-            ostr)))
-
-(define (take-opens lst opens)
-  ;; (format #t "take-opens")
-  (if (null? lst)
-      opens
-      (let ((elt (car lst)))
-        (if (symbol? elt)
-            (if (equal? elt '-open)
-                (take-opens (cddr lst)
-                            (cons (normalize-open (cadr lst)) opens))
-                (take-opens (cdr lst) opens))
-            (if (string? elt)
-                (if (string=? elt "-open")
-                    (take-opens (cddr lst)
-                                (cons (normalize-open (cadr lst)) opens))
-                    (take-opens (cdr lst) opens))
-                (take-opens (cdr lst) opens))))))
+(define (split-opens flags)
+  ;; (format #t "split-opens: ~A\n" flags)
+  (let recur ((flags flags)
+              (opens '())
+              (opts  '())
+              (std  #f))
+    (if (null? flags)
+        (values opens opts std)
+        (if (list? (car flags))
+            (let-values (((-opens -opts -std) (split-opens (car flags))))
+              (recur (cdr flags)
+                     (concatenate -opens opens)
+                     (concatenate -opts opts)
+                     -std))
+            (if (symbol? (car flags))
+                (cond
+                 ((equal? (car flags) '-open)
+                  (recur (cddr flags)
+                         (cons (normalize-open (cadr flags)) opens)
+                         opts std))
+                 ((equal? (car flags) ':standard)
+                  (recur (cdr flags) opens opts #t))
+                 (else
+                  (recur (cdr flags) opens (cons (car flags) opts) std)))
+                ;; not symbol
+                (if (string? (car flags))
+                    (if (string=? (car flags) "-open")
+                        (recur (cddr flags)
+                               (cons (normalize-open (cadr flags)) opens)
+                               std)
+                        (recur (cdr flags) opens (cons (car flags) opts)
+                               std))
+                    ;; not symbol, not string
+                    (error 'bad-arg
+                           (format #f "ERROR: unexpected flag type ~A"
+                                   flags))))))))
 
 ;; (flags :standard)
 ;; (flags (:standard -open Tezos_base__TzPervasives -open Tezos_micheline))
 ;; (:standard -linkall)
 (define (normalize-stanza-fld-flags flags)
-  ;; (display (format #f "FLD flags: ~A" flags)) (newline)
+  ;; (format #t "normalize-stanza-fld-flags: ~A\n" flags)
   (if flags
-      (let ((flags (if (list? (cadr flags))
-                       (cadr flags)
-                       (list (cdr flags)))))
-        ;; FIXME: expand :standard
-        (let ((std (any (lambda (flag) (equal? flag :standard)) flags))
-              (opens (take-opens flags '()))
-              ;; (first-open (find-tail (lambda (elt)
-              ;;                          (if (symbol? elt)
-              ;;                              (equal? elt '-open)
-              ;;                              (if (string? elt)
-              ;;                                  (string=? "-open" elt)
-              ;;                                  #f)))
-              ;;                        flags))
-              )
-          ;; (display (format #f "opens: ~A" opens)) (newline)
+      ;; (let* ((flags (if (list? (cadr flags))
+      ;;                   (cadr flags)
+      ;;                   (list (cdr flags))))
+      (let* ((flags (cdr flags))
+             ;; FIXME: expand :standard
+             (std (any (lambda (flag) (equal? flag :standard)) flags))
+             (clean-flags (if std (remove :item :standard flags) flags)))
+        ;; (format #t "DIRTY: ~A\n" flags)
+        ;; (format #t "STD: ~A\n" std)
+        ;; (format #t "CLEAN: ~A\n" clean-flags)
+        (let-values (((opens opts std) (split-opens clean-flags)))
+          ;; (format #t "OPENS: ~A\n" (reverse opens))
+          ;; (format #t "OPTS: ~A\n" (reverse opts))
+          ;; (format #t "STD: ~A\n" std)
           (list :opts
                 (concatenate
                  (if std '((:standard)) '())
-                 (if (null? opens) '() `((:opens ,opens)))
+                 (if (null? opens) '() `((:opens ,(reverse opens))))
                  `((:raw ,flags))
+                 `((:flags ,(reverse opts)))))))
+      #f))
+
+;; library_flags
+(define (normalize-stanza-fld-lib_flags lib-flags)
+  ;; (format #t "normalize-stanza-fld-lib_flags: ~A" lib-flags)
+  (if lib-flags
+      (let ((lib-flags (if (list? (cadr lib-flags))
+                       (cadr lib-flags)
+                       (list (cdr lib-flags))))
+            ;; FIXME: expand :standard
+            (std (any (lambda (flag) (equal? flag :standard)) lib-flags)))
+        (let-values (((opens opts std) (split-opens lib-flags)))
+          ;; (format #t "  opens: ~A" opens)
+          ;; (format #t "  opts: ~A"  opts)
+          ;; (format #t "  std:  ~A"  std)
+          (list :lib-flags
+                (concatenate
+                 (if std '((:standard)) '())
+                 (if (null? opens) '() `((:opens ,opens)))
+                 `((:raw ,lib-flags))
                  `((:flags ,@(if std
-                             (remove :item :standard flags)
-                             flags)))))))
+                                 (remove :item :standard lib-flags)
+                                 lib-flags)))))))
       #f))

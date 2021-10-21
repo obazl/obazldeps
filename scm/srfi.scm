@@ -1,5 +1,9 @@
 
 ;; srfi 1
+;;(define (remove pred l) (filter (lambda (x) (not (pred x))) l))
+;; see 'remove' in utils.scm
+
+;; srfi 1
 (define (last-pair lis)
   (check-arg pair? lis last-pair)
   (let lp ((lis lis))

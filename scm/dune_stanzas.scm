@@ -37,7 +37,7 @@
               ((ocamllex) (normalize-stanza-ocamllex stanza))
               ((rule) (normalize-stanza-rule
                           pkg-path ocaml-srcs stanza))
-              ((test) (normalize-stanza-test ocaml-srcs stanza))
+              ((test) (normalize-stanza-test pkg-path ocaml-srcs stanza))
               ((tests) (normalize-stanza-tests ocaml-srcs stanza))
 
               ((:dune-project) stanza)
@@ -180,11 +180,14 @@
   )
 
 (define (update-public-exe-table pkg-path pubname filename)
-  (format #t "update-public-exe-table: ~A => ~A/~A\n"
-          pubname pkg-path filename)
+  ;; (format #t "update-public-exe-table: ~A => ~A/~A\n"
+  ;;         pubname pkg-path filename)
   (let* ((pubname (symbol->string pubname))
+
+         ;; FIXME: only for executables
          (target-label (string-append "//" pkg-path ":"
-                                      (symbol->string filename))))
+                                      (symbol->string filename)
+                                      ".out")))
 
     (hash-table-set! public-exe->label
                      (string->symbol pubname) target-label)
@@ -197,13 +200,13 @@
 
     (let recur ((path-segs (reverse (string-split pkg-path #\/)))
                 (pfx ""))
-      (format #t "path-segs: ~A\n" path-segs)
+      ;; (format #t "path-segs: ~A\n" path-segs)
       (if (null? path-segs)
           '()
           (let* ((pfx (string-append (car path-segs) "/" pfx))
                  (k (string-append pfx pubname)))
-            (format #t " k: ~A;  pfx:   ~A\n" k pfx)
-            (format #t " target label: ~A\n" target-label)
+            ;; (format #t " k: ~A;  pfx:   ~A\n" k pfx)
+            ;; (format #t " target label: ~A\n" target-label)
             (hash-table-set! public-exe->label
                              (string->symbol k) target-label)
             (hash-table-set! public-exe->label
@@ -223,16 +226,20 @@
 ;;   (-> void_for_linking-alpha-protocol-plugin.empty))
 
 (define (normalize-lib-select select)
-  (format #t "normalize-lib-select: ~A\n" select)
+  ;; (format #t "normalize-lib-select: ~A\n" select)
+  ;; select: (select main from (b -> c)... (-> d))
   (let ((select-file (cadr select))
         (clauses (cdddr select)))
     ;; if clause RHSs are equal, then reason for select is to force
     ;; link of LHS lib
 
-    ;; LHS lib is also the select condition. we map it to a config
-    ;; setting, so the result is: if config-setting then add LHS lib
-    ;; to deps. so the user passes config settings, selecting modules
-    ;; to link - build profiles (platforms)
+    ;; in each clause, LHS is both a lib and the select condition. we
+    ;; map it to a config setting, so the result is: if config-setting
+    ;; then add LHS lib to deps. so the user passes config settings,
+    ;; selecting modules to link - build profiles (platforms)
+
+    ;; the problem: need to resolve RHS to a bazel label. lacking
+    ;; namespaces our only option is a lookup table.
 
     ;; e.g.
     ;; platform(
@@ -245,13 +252,54 @@
     ;; then a config_setting with these constraing values
     ;; then select on config_setting
 
-    (format #t "SELECT file: ~A\n" select-file)
-    (format #t "CLAUSES: ~A\n" clauses)
-    select))
+    ;; bug dune select also produces a file target - the clausal RHS
+    ;; copied to the main selected file. to support that, we need to
+    ;; generate an ocaml_module target for the main selecte file, and
+    ;; add it to the libdeps. the ocaml_module target must select its
+    ;; 'struct' (src) attr using the select logic here.
+
+    ;; so to convert a 'libraries' fld with selects, we should have
+    ;; one condition per select, which means one config/constraint
+    ;; setting per select. output will look like:
+    ;; select({ "<LHSa-config-label>": ["<LHSa-tgt>", "<main-filea>"],
+    ;;          "<LHSa-config-label>": ["<LHSa-tgt>", "<main-filea>"],
+    ;;          "//condition:default": ["<main-filea>"]
+    ;; })
+    ;; + select({ "<LHSb-config-label>": ["<LHSb-label>", "<main-fileb>"]})
+    ;;    ...})
+
+    ;; normal form:
+    ;; (:select
+    ;;   ((:selectors ((LHS-label (RHS-label main-select-label)) ... )
+    ;;    (:default default-file)
+
+    ;; BUT: do we need to normalize? we cannot yet resolve LHS lib anyway.
+
+    ;; (format #t "SELECT file: ~A\n" select-file)
+    ;; (format #t "CLAUSES: ~A\n" clauses)
+    ;; (let ((conditionals
+    ;;        (map (lambda (clause)
+    ;;               ;; last clause is (-> x), all others are (x -> y)
+    ;;               (if (equal? '-> (car clause))
+    ;;                   ;; last clause
+    ;;                   )
+    ;;               (let* ((lhs (car clause))
+    ;;                      (rhs (caddr clause))
+    ;;                      ;; names-tbl not yet built, emitter must do this:
+    ;;                      ;;(label (assoc :label (names-tbl lhs)))
+    ;;                      )
+    ;;                 (if (not (equal? '-> (cadr clause)))
+    ;;                     (error 'bad-arg' "ERROR: missing expected '->'"))
+    ;;                 (list
+    ;;                  (string-append "//config/" (symbol->string lhs))
+    ;;                  (list (string-append "LABEL:" (symbol->string lhs))))))
+    ;;             clauses))))
+      select))
 
 (define (normalize-exe-libraries libs-assoc stanza-alist)
+  ;; (format #t "normalize-exe-libraries: ~A\n" libs-assoc)
   (let-values (((constant contingent)
-                (let recur ((libs libs-assoc)
+                (let recur ((libs (cdr libs-assoc))
                             (constants '())
                             (contingents '()))
                   (if (null? libs)
@@ -267,16 +315,23 @@
                           (recur (cdr libs)
                                  (cons (car libs) constants)
                                  contingents))))))
-    (format #t "constant deps: ~A\n" constant)
-    (format #t "contingent deps: ~A\n" contingent)
+    ;; (format #t "constant deps: ~A\n" constant)
+    ;; (format #t "contingent deps: ~A\n" contingent)
     `(:deps
-      ((:constant ,constant)
+      ((:constant ,(sort! constant sym<?))
        (:contingent ,contingent)))))
 
-(define (normalize-executable privname pubname stanza-alist)
-  (format #t "normalize-executable ~A, ~A\n" privname pubname)
+(define (normalize-executable pkg-path privname pubname stanza-alist srcfiles)
+  ;; (format #t "NORMALIZE-EXECUTABLE ~A, ~A\n" privname pubname)
+  ;; (if pubname
+  ;;     (if (equal? pubname 'tezos-node)
+  ;;         (format #t "stanza-alist: ~A\n" stanza-alist)))
   ;; NB: stanza-alist excludes 'names' and 'public_names'
   ;; if has modules list, one must match 'name'
+
+  (update-public-exe-table pkg-path pubname pubname)
+  (update-public-exe-table pkg-path privname pubname)
+
   (let* ((modules (assoc 'modules stanza-alist)))
     (if modules
         (if (> (length (cdr modules)) 1)
@@ -284,53 +339,90 @@
               (format #t "    WARNING: multiple modules for executable\n"))
             ;; just like the 'modules' fld of 'library' stanzas
             (if (not
-                 (or (equal? (cadr privname) (cadr modules))
-                     (equal? (normalize-module-name (cadr privname))
+                 (or (equal? privname (cadr modules))
+                     (equal? (normalize-module-name privname)
                              (normalize-module-name (cadr modules)))))
                 ;; error?
                 (format #t "    WARNING: name/module mismatch: ~A : ~A\n"
-                        (cadr privname)
+                        privname
                         (normalize-module-name (cadr modules))))))
 
-    (list :executable  ;; (car stanza)
-          (concatenate
-           `((:name ((:private ,privname)
-                     (:public ,pubname))))
-           (map (lambda (fld-assoc)
-                 ;; (format #t "exec fld-assoc: ~A\n" fld-assoc)
-                 ;; (let ((fld (if (pair? fld-assoc)
-                 ;;                fld-assoc
-                 ;;                (list fld-assoc))))
-                 (case (car fld-assoc)
-                   ((libraries)
-                    (normalize-exe-libraries fld-assoc stanza-alist))
-                   ((modules)
-                    (let-values (((direct indirect)
-                                  (expand-modules-fld modules srcfiles)))
-                      ;; (format #t
-                      ;;         "    direct: ~A\n    indirect ~A\n"
-                      ;;         direct indirect)
-                      (let* ((raw `((:raw ,fld-assoc)))
-                             (direct (if (null? direct)
-                                         raw
-                                         (cons `(:direct ,@direct) raw)))
-                             (indirect (if (null? indirect)
-                                           direct
-                                           (cons `(:indirect
-                                                   ,@(reverse indirect))
-                                                 direct)))
-                             (result `(:modules ,indirect)))
-                        ;;(format #t "RESULT ~A: ~A\n" stanza-name result)
-                        result)))
-                   ((flags) (normalize-stanza-fld-flags fld-assoc))
-                   ((foreign_stubs)
-                    (normalize-stanza-fld-foreign_stubs (cdr fld-assoc)))
+    (let ((s
+           (remove '()
+                   (map (lambda (fld-assoc)
+                          ;; (if (equal? pubname 'rpc_openapi)
+                          ;;     (format #t "rpc_openapi pubname: ~A\n"
+                          ;;                fld-assoc))
+                          (case (car fld-assoc)
+                            ((name) '()) ;; already taken care of
+                            ((public_name) '()) ;; already taken care of
+                            ((libraries) ;; => :deps
+                             (normalize-exe-libraries fld-assoc stanza-alist))
+                            ((modules) ;; => :modules
+                             (let-values (((direct indirect)
+                                           (normalize-stanza-lib-fld-modules
+                                            srcfiles fld-assoc)))
+                               (let* ((raw `((:raw ,fld-assoc)))
+                                      (main (cons `(:main ,(normalize-module-name privname))
+                                                  raw))
+                                      (direct-filtered (if (null? direct) '()
+                                                           (begin
+                                                             ;; (format #t "REMOVING ~A from ~A\n"
+                                                             ;;         privname direct)
+                                                             (remove (normalize-module-name privname)
+                                                                     (remove privname direct)))))
+                                      (direct (if (null? direct-filtered)
+                                                  main
+                                                  (cons `(:direct
+                                                          ,@(sort! direct-filtered sym<?))
+                                                        main)))
+                                      (indirect (if (null? indirect)
+                                                    direct
+                                                    (cons `(:indirect
+                                                            ,@(sort!
+                                                               indirect
+                                                               sym<?))
+                                                          direct)))
+                                      (result `(:modules ,indirect)))
+                                 ;; (format #t "RESULT modules: ~A\n" result)
+                                 result)))
+                            ((flags) (normalize-stanza-fld-flags fld-assoc))
+                            ((foreign_stubs)
+                             (normalize-stanza-fld-foreign_stubs (cdr fld-assoc)))
 
-                   (else fld-assoc)))
-               stanza-alist)))))
+                            (else fld-assoc)))
+                        stanza-alist))))
+
+      ;; (if pubname
+      ;;     (if (equal? pubname 'tezos-node)
+      ;;         (format #t "tezos-node stanza: ~A\n" s)))
+
+      (if-let ((mods (assoc :modules s)))
+              (list :executable
+                    (concatenate
+                     `((:name ((:private ,privname)
+                               (:public ,pubname))))
+                     s))
+              ;; else 'modules' fld is missing, so add all modules
+              ;; and don't forget to remove 'main' from the list
+              (let* ((xmodules (srcs->module-names srcfiles '()))
+                     (modules (remove (normalize-module-name privname)
+                                      (remove privname xmodules))))
+                (list :executable
+                      (concatenate
+                       `((:name ((:private ,privname)
+                                 (:public ,pubname))))
+                       `((:modules
+                          ((:main ,privname)
+                           (:direct
+                            ,@(sort!
+                               modules
+                               sym<?)))))
+                       s)))))))
 
 (define (normalize-stanza-executable pkg-path srcfiles stanza)
-  ;; (format #t "normalize-stanza-executable: ~A\n  ~A\n" pkg-path stanza)
+  ;; (format #t "NORMALIZE-STANZA-EXECUTABLE: ~A\n" pkg-path)
+  ;;stanza)
 
   ;; "<name> is a module name that contains the main entry point of
   ;; the executable." So 'name' must correspond to a .ml file. If
@@ -362,9 +454,11 @@
 
   (let* ((stanza-alist (cdr stanza))
          ;; 'name' fld is required
-         (privname (assoc 'name stanza-alist))
-         ;; private_name?
-         (modules (assoc 'modules stanza-alist)))
+         (privname (cadr (assoc 'name stanza-alist)))
+         (pubname (if-let ((pubname (assoc 'public_name stanza-alist)))
+                          (cadr pubname) privname))
+         (modules (assoc 'modules stanza-alist))
+         (filtered-stanza-alist (alist-delete '(names public_names) stanza-alist)))
     ;; (format #t " N: ~A\n" privname)
     ;; (format #t " Ms: ~A\n" modules)
 
@@ -375,69 +469,75 @@
               (format #t "    WARNING: multiple modules for executable\n"))
               ;; just like the 'modules' fld of 'library' stanzas
             (if (not
-                 (or (equal? (cadr privname) (cadr modules))
-                     (equal? (normalize-module-name (cadr privname))
+                 (or (equal? privname (cadr modules))
+                     (equal? (normalize-module-name privname)
                              (normalize-module-name (cadr modules)))))
                 ;; error?
                 (format #t "    WARNING: name/module mismatch: ~A : ~A\n"
-                        (cadr privname)
+                        privname
                         (normalize-module-name (cadr modules))))))
 
-    (list :executable  ;; (car stanza)
-          (map (lambda (fld-assoc)
-                 ;; (format #t "exec fld-assoc: ~A\n" fld-assoc)
-                 ;; (let ((fld (if (pair? fld-assoc)
-                 ;;                fld-assoc
-                 ;;                (list fld-assoc))))
-                 (case (car fld-assoc)
-                   ((name)
-                    ;; (format #t "exec name: ~A\n" (cadr name))
-                    (let ((pubname (assoc 'public_name stanza-alist)))
-                      (if pubname
-                          (begin
-                            `(:name ((:private ,(cadr privname))
-                                     (:public ,(cadr pubname))))
-                            (update-public-exe-table pkg-path
-                                                     (cadr pubname)
-                                                     (cadr pubname))
-                            (update-public-exe-table pkg-path
-                                                     (cadr privname)
-                                                     (cadr pubname)))
-                          (begin
-                            `(:name ((:private ,(cadr privname))))
-                            (update-public-exe-table pkg-path (cadr privname)
-                                                     (cadr privname)))
-                          ))
-                    )
+    (normalize-executable pkg-path privname pubname filtered-stanza-alist srcfiles)
+    ))
+    ;; (list :executable  ;; (car stanza)
+    ;;       (remove '()
+    ;;       (map (lambda (fld-assoc)
+    ;;              ;; (format #t "exec fld-assoc: ~A\n" fld-assoc)
+    ;;              ;; (let ((fld (if (pair? fld-assoc)
+    ;;              ;;                fld-assoc
+    ;;              ;;                (list fld-assoc))))
+    ;;              (case (car fld-assoc)
+    ;;                ((name)
+    ;;                 (format #t "exec privname: ~A\n" (cadr privname))
+    ;;                 ;;(let ((result
+    ;;                 (let ((pubname (assoc 'public_name stanza-alist)))
+    ;;                   (if pubname
+    ;;                       (begin
+    ;;                         (update-public-exe-table pkg-path
+    ;;                                                  (cadr pubname)
+    ;;                                                  (cadr pubname))
+    ;;                         (update-public-exe-table pkg-path
+    ;;                                                  (cadr privname)
+    ;;                                                  (cadr pubname))
+    ;;                         `(:name ((:private ,(cadr privname))
+    ;;                                  (:public ,(cadr pubname)))))
+    ;;                       (begin
+    ;;                         (update-public-exe-table pkg-path (cadr privname)
+    ;;                                                  (cadr privname))
+    ;;                         `(:name ((:private ,(cadr privname))))))))
+    ;;                   ;;     ))
+    ;;                   ;; (format #t "XXXX ~A\n" result)
+    ;;                   ;; result)
+    ;;                 ;; )
 
-                   ((public_name) '())
-                   ((libraries)
-                    ;; ???
-                    )
-                   ((modules)
-                    (let-values (((direct indirect)
-                                  (expand-modules-fld modules srcfiles)))
-                      ;; (format #t
-                      ;;         "    direct: ~A\n    indirect ~A\n"
-                      ;;         direct indirect)
-                      (let* ((raw `((:raw ,fld-assoc)))
-                             (direct (if (null? direct)
-                                         raw
-                                         (cons `(:direct ,@direct) raw)))
-                             (indirect (if (null? indirect)
-                                           direct
-                                           (cons `(:indirect
-                                                   ,@(reverse indirect))
-                                                 direct)))
-                             (result `(:modules ,indirect)))
-                        ;;(format #t "RESULT ~A: ~A\n" stanza-name result)
-                        result)))
-                   ((flags) (normalize-stanza-fld-flags fld-assoc))
-                   ((foreign_stubs)
-                    (normalize-stanza-fld-foreign_stubs (cdr fld-assoc)))
+    ;;                ((public_name) '())
+    ;;                ((libraries) ;; => :deps
+    ;;                 (normalize-exe-libraries fld-assoc stanza-alist))
+    ;;                ((modules)  ;; => :modules
+    ;;                 (let-values (((direct indirect)
+    ;;                               (expand-modules-fld modules srcfiles)))
+    ;;                   ;; (format #t
+    ;;                   ;;         "    direct: ~A\n    indirect ~A\n"
+    ;;                   ;;         direct indirect)
+    ;;                   (let* ((raw `((:raw ,fld-assoc)))
+    ;;                          (direct (if (null? direct)
+    ;;                                      raw
+    ;;                                      (cons `(:direct ,@direct) raw)))
+    ;;                          (indirect (if (null? indirect)
+    ;;                                        direct
+    ;;                                        (cons `(:indirect
+    ;;                                                ,@(reverse indirect))
+    ;;                                              direct)))
+    ;;                          (result `(:modules ,indirect)))
+    ;;                     ;;(format #t "RESULT ~A: ~A\n" stanza-name result)
+    ;;                     result)))
+    ;;                ((flags) (normalize-stanza-fld-flags fld-assoc))
+    ;;                ((foreign_stubs)
+    ;;                 (normalize-stanza-fld-foreign_stubs (cdr fld-assoc)))
 
-                   (else fld-assoc)))
-               stanza-alist))))
+    ;;                (else fld-assoc)))
+    ;;            stanza-alist)))
+;; ))
 
 ;; ((executables ((names test_clic) (libraries tezos-clic alcotest-lwt) (flags (:standard -open Tezos_stdlib -open Tezos_clic)))) (rule ((alias buildtest) (deps test_clic.exe) (action (progn)))) (rule ((alias runtest_clic) (action (run %{exe:test_clic.exe})))) (rule ((alias runtest) (package tezos-clic) (deps (alias runtest_clic)) (action (progn)))))
 
@@ -445,8 +545,8 @@
 ;; normalize-stanza-executables: src/lib_store/test
 
 (define (normalize-stanza-executables pkg-path srcfiles stanza)
-  (format #t "normalize-stanza-executables: ~A\n" pkg-path) ;; ~A\n" stanza)
-  (format #t "  stanza:  ~A\n" stanza)
+  ;; (format #t "NORMALIZE-STANZA-EXECUTABLES: ~A\n" pkg-path) ;; ~A\n" stanza)
+  ;; (format #t "  stanza:  ~A\n" stanza)
   ;; (:executables (names test_clic) ...
   (let* ((stanza-alist (cdr stanza))
          (privnames (assoc 'names stanza-alist))
@@ -456,16 +556,16 @@
          ;; (names-ct (length names))
          ;; (typ (if (> names-ct 1) :executables :executable)))
 
-    (format #t "stanza-alist: ~A\n" stanza-alist)
-    (format #t "filtered-stanza-alist: ~A\n" filtered-stanza-alist)
+    ;; (format #t "stanza-alist: ~A\n" stanza-alist)
+    ;; (format #t "filtered-stanza-alist: ~A\n" filtered-stanza-alist)
 
-    (format #t "    names: ~A\n" privnames)
-    ;; only five cases in tezos of:
-    (format #t "    pubnames: ~A\n" pubnames)
+    ;; (format #t "    names: ~A\n" privnames)
+    ;; ;; only five cases in tezos of:
+    ;; (format #t "    pubnames: ~A\n" pubnames)
 
     (if (> (length (cdr privnames)) 1)
         (begin
-          (format #t "MULTIPLE NAMES\n")
+          ;; (format #t "MULTIPLE NAMES\n")
           (if pubnames
               (if (not (equal?
                         (length (cdr privnames))
@@ -480,10 +580,10 @@
 
     (if pubnames
         (map (lambda (privname pubname)
-               ;; (format #t "exe-name ~A\n" exe-name)
+               ;; (format #t "privname ~A, pubname: ~A\n" privname pubname)
                (update-public-exe-table pkg-path pubname privname)
                (update-public-exe-table pkg-path privname privname)
-               (normalize-executable privname pubname filtered-stanza-alist)
+               (normalize-executable pkg-path privname pubname filtered-stanza-alist srcfiles)
                ;; `(:executable ((:name ((:private ,privname)
                ;;                        (:public ,pubname)))))
                )
@@ -491,9 +591,10 @@
 
         ;; else no pubnames
         (map (lambda (privname)
-               (format #t "exe-name ~A\n" privname)
+               ;; (format #t "privname: ~A\n" privname)
                (update-public-exe-table pkg-path privname privname)
-               `(:executable ((:name ((:private ,privname)))))
+               (normalize-executable pkg-path privname privname filtered-stanza-alist srcfiles)
+               ;; `(:executable ((:name ((:private ,privname)))))
                         ;; (:module ,(normalize-module-name name))))))
                )
              (cdr privnames)))))
@@ -546,7 +647,7 @@
 ;; i.e. (files (file-name as link-name))
 ;; so we return a list of pairs (link-name file-name)
 (define (normalize-install-files files)
-  (format #t "normalize-install-files: ~A\n" files)
+  ;; (format #t "normalize-install-files: ~A\n" files)
   (let recur ((entries files)
               (links '())
               (files '()))
@@ -555,10 +656,10 @@
         (if (list? (car entries))
             (if (equal? 3 (length (car entries)))
                 (begin
-                  (format #t "LEN3: ~A\n" (car entries))
+                  ;; (format #t "LEN3: ~A\n" (car entries))
                 (if (equal 'as (cadr (car entries)))
                     (begin
-                      (format #t "caar: ~A\n" (caar entries))
+                      ;; (format #t "caar: ~A\n" (caar entries))
                       (recur (cdr entries)
                              (cons (caddr (car entries)) links)
                              (cons (caar entries) files)))
@@ -576,8 +677,8 @@
                    (cons (car entries) files))))))
 
 (define (normalize-stanza-install pkg-path dune-project-stanzas stanza)
-  (format #t "normalize-stanza-install: ~A\n  ~A\n" pkg-path stanza)
-  (format #t "    dune-project: ~A\n" dune-project-stanzas)
+  ;; (format #t "normalize-stanza-install: ~A\n  ~A\n" pkg-path stanza)
+  ;; (format #t "    dune-project: ~A\n" dune-project-stanzas)
   (let* ((stanza-alist (cdr stanza))
          (section (cadr (assoc 'section stanza-alist)))
          (package (if-let ((pkg (assoc 'package stanza-alist)))
@@ -589,8 +690,8 @@
     (let-values (((link-names file-names)
                   (normalize-install-files
                    (cdr (assoc 'files stanza-alist)))))
-      (format #t "link-names: ~A\n" link-names)
-      (format #t "file-names: ~A\n" file-names)
+      ;; (format #t "link-names: ~A\n" link-names)
+      ;; (format #t "file-names: ~A\n" file-names)
 
       (for-each (lambda (link-name file-name)
                   (update-installation-table
@@ -603,22 +704,28 @@
                                    ":" (symbol->string file-name)))))
                 link-names file-names)
 
-      (format #t "dune pkg name: ~A\n" package)
+      ;; (format #t "dune pkg name: ~A\n" package)
       (cons :install (list (cdr stanza))))))
 
-(define (normalize-stanza-test srcfiles stanza)
+(define (normalize-stanza-test pkg-path srcfiles stanza)
   ;; (display (format #f "dir: ~A" pfx)) (newline)
   ;; (display (format #f "normalize-stanza-test: ~A" stanza)) (newline)
-  (list (car stanza)
-        (map (lambda (fld-assoc)
-               (let ((fld (if (pair? fld-assoc) fld-assoc (list fld-assoc))))
-                 (case (car fld-assoc)
-                   ((name) (normalize-stanza-fld-name (cadr fld-assoc)))
-                   ((flags) (normalize-stanza-fld-flags (cadr fld-assoc)))
-                   ((foreign_stubs)
-                    (normalize-stanza-fld-foreign_stubs (cdr fld-assoc)))
-                   (else fld-assoc))))
-             (cdr stanza))))
+  (let* ((stanza-alist (cdr stanza))
+         (privname (assoc 'name stanza-alist)))
+    (list (car stanza)
+          (remove
+           '()
+           (map (lambda (fld-assoc)
+                  (case (car fld-assoc)
+                    ((name) (normalize-stanza-fld-name
+                             pkg-path privname stanza-alist))
+                    ((public_name) '())
+                    ;; ((name) (normalize-stanza-fld-name (cadr fld-assoc)))
+                    ((flags) (normalize-stanza-fld-flags (cadr fld-assoc)))
+                    ((foreign_stubs)
+                     (normalize-stanza-fld-foreign_stubs (cdr fld-assoc)))
+                    (else fld-assoc)))
+                (cdr stanza))))))
 
 (define (normalize-stanza-tests srcfiles stanza)
   ;; (display (format #f "dir: ~A" pfx)) (newline)

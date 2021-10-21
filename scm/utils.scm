@@ -123,17 +123,19 @@
     (string-set! s 0 (char-upcase (string-ref s 0)))
     (string->symbol s)))
 
-(define (file-name->module-name fname)
-  (let ((mraw (if (string-suffix? ".ml" fname)
-                  (string-drop-right fname 3)
-                  (if (string-suffix? ".mli" fname)
-                      (string-drop-right fname 4)
-                      (error 'bad-filename
-                             (string-append "extension should be .ml or .mli: "
-                                            fname))))))
-    (normalize-module-name mraw)
-    ;; (string-set! mraw 0 (char-upcase (string-ref mraw 0)))
-    ))
+(define (file-name->module-name path)
+  (let* ((last-slash (string-index-right path (lambda (c) (eq? c #\/))))
+         (fname (if last-slash
+                       (string-drop path (+ last-slash 1))
+                       path))
+         (mraw (if (string-suffix? ".ml" fname)
+                   (string-drop-right fname 3)
+                   (if (string-suffix? ".mli" fname)
+                       (string-drop-right fname 4)
+                       (error 'bad-filename
+                              (string-append "extension should be .ml or .mli: "
+                                             fname))))))
+    (normalize-module-name mraw)))
 
 ;; s7test.scm
 (define (flatten lst)

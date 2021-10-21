@@ -32,7 +32,7 @@
     (if (not resolved)
         (if-let ((opam (maybe-opam module)))
                 (begin
-                  (format #t "OPAM: ~A: ~A\n" module opam)
+                  ;; (format #t "OPAM: ~A: ~A\n" module opam)
                   (hash-table-set! opam-tbl
                                    (string->symbol opam)
                                    (module->opam-label opam))
@@ -43,11 +43,14 @@
 
 (define (resolve-opam module)
   ;; (format #t "resolve-opam: ~A\n" module)
-  (if-let ((opam (opam-tbl module)))
-          opam
-          (if-let ((opam (opam-tbl (normalize-module-name module))))
-                  opam
-                  (update-opam-table module))))
+  (let ((resolved
+         (if-let ((opam (opam-tbl module)))
+                 opam
+                 (if-let ((opam (opam-tbl (normalize-module-name module))))
+                         opam
+                         (update-opam-table module)))))
+    ;; (format #t "OPAM resolved: ~A\n" resolved)
+    resolved))
 
 (define (codept->opam-table codept-sexp)
   (let* ((unresolved-modules (codept->unknown-modules codept-sexp))
