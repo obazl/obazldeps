@@ -117,7 +117,7 @@ int main(int argc, char **argv)
 {
     /* Parse options, with --multiline we enable multi line editing. */
     int opt;
-    while ((opt = getopt(argc, argv, "dmkhvV")) != -1) {
+    while ((opt = getopt(argc, argv, "edmkhvV")) != -1) {
         switch (opt) {
         case 'd':
             debug = true;
@@ -148,6 +148,8 @@ int main(int argc, char **argv)
 
     /* initializes s7 */
     obazl_configure(getcwd(NULL, 0));
+
+    /* s7_repl(argc, argv); */
 
     xen_repl(argc, argv);
 

@@ -1,3 +1,3 @@
-(display "loading @camlark//scm/camlark.scm")
-(newline)
+;; (display "loading @camlark//scm/camlark.scm")
+;; (newline)
 

@@ -19,7 +19,7 @@
 #include "uthash.h"
 #include "utstring.h"
 
-#include "ocamlark.h"
+#include "camlark.h"
 #include "runner.h"
 
 UT_array *opam_dirs;             /* string list */

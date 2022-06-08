@@ -1,6 +1,7 @@
 ;; (format #t "Loading .obazl.d/scm/dune.scm\n")
 
 (load "alist.scm")
+(load "dune_normalize.scm")
 (load "srfi.scm")
 
 ;; dune-alist:
@@ -27,44 +28,35 @@
 ;;  (:files ((:ml  ((:file ml-file) (:deps ...)))
 ;;           (:mli ((:file mli-file) (:deps ...))))))
 
+(define (pkg-namespaced? dune-pkg-tbl)
+  (any (lambda (s)
+         (if (assoc-in '(:library :namespaced) (list s)) #t #f))
+       (cadr (assoc :stanzas (cdr dune-pkg-tbl)))))
 
-(define (pkg-has-ns-archive? dune-pkg-tbl)
-  (if-let ((lib (assoc-in '(:stanzas library) (cdr dune-pkg-tbl))))
-          (if-let ((wrapped (assoc 'wrapped (cdr lib))))
-                  (begin
-                    ;; (display (format #f "WRAPPED ~A\n~A"
-                    ;;                  dune-pkg-tbl (cadr wrapped)))
-                    ;; (newline)
-                    ;; FIXME: handle '(wrapped)'
-                    (if (equal? 'false  (cadr wrapped))
-                        #f
-                        #t))
-                  (begin
-                    ;; (display (format #f "NOWRAPPED ~A" dune-pkg-tbl))
-                    ;; (newline)
-                    #t))
+
+;; dune always makes an archive from 'library' stanza,
+;; but may or may not namespace it, depending on 'unwrapped' fld.
+(define (pkg-has-archive? dune-pkg-tbl)
+  (assoc-in '(:stanzas :library) (cdr dune-pkg-tbl)))
+
+;; unwrapped 'library' stanza
+(define (pkg-has-library? dune-pkg-tbl)
+  (if-let ((libs (assoc-in+ '(:stanzas :library) (cdr dune-pkg-tbl))))
+          (any (lambda (lib)
+                 (if-let ((wrapped (assoc 'wrapped (cdr lib))))
+                         ;; FIXME: handle empty '(wrapped)'
+                         (if (equal? 'false  (cadr wrapped))
+                             #t
+                             #f)
+                         #f))
+               libs)
           #f))
 
-;; (define (pkg-has-stanza? rule dune-pkg-tbl)
-;;   ;; (display (format #f "~A" dune-pkg-tbl))
-;;   ;; (newline)
-;;   (if (assoc-in `(:stanzas ,rule) (cdr dune-pkg-tbl))
-;;       #t
-;;       #f))
-
-(define (pkg-has-library? dune-pkg-tbl)
-  (if-let ((libs (assoc-in+ '(:stanzas library) (cdr dune-pkg-tbl))))
-          (begin
-            ;; (display (format #f "libs: ~A" libs)) (newline)
-            (any (lambda (lib)
-                   (if-let ((wrapped (assoc 'wrapped (cdr lib))))
-                           ;; FIXME: handle empty '(wrapped)'
-                           (if (equal? 'false  (cadr wrapped)) #t #f)
-                           (begin
-                             ;; (display (format #f "NOWRAP ~A" dune-pkg-tbl))
-                             ;; (newline)
-                             #f)))
-                 libs))
+(define (pkg-has-signature? dune-pkg-tbl)
+  (if-let ((srcs (assoc-in '(:srcfiles :ocaml :static) (cdr dune-pkg-tbl))))
+          (any (lambda (srcfile)
+                   (string-suffix? ".mli" srcfile))
+                 (cadr srcs))
           #f))
 
 (define dunefile-ext-list
@@ -157,8 +149,10 @@
          (dunep (open-input-file (string-append path "/" fname)))
          (stanzas (reverse (let recur ((sexp-list '()))
                              ;; (format #t "reading ~A/~A\n" path fname)
+                             ;; if sexp == (include ...) then read it in
                              (let ((next-sexp
                                     (catch 'read-error
+                                           ;; where the read happens:
                                            (lambda () (read dunep))
                                            (lambda args
                                              (handle-read-error path fname args)))))
@@ -251,7 +245,7 @@
     (assoc+ :library stanzas)))
 
 (define (sort-srcfiles srcfiles)
-  (if-let ((srcs (assoc :ocaml (cadr srcfiles))))
+  (if-let ((srcs (assoc-in '(:ocaml :static) (cadr srcfiles))))
           (sort! (cadr srcs) string<?))
           ;; '())
 
@@ -285,79 +279,6 @@
   ;;   (list
   ;;    (list :ocaml ocaml-srcs))))
 
-(define (normalize-stanzas pkg-path dune-project-stanzas srcfiles stanzas)
-  ;; (format #t "normalize-stanzas: ~A\n" stanzas)
-  (flush-output-port)
-  (let ((normed (map
-                 (lambda (stanza)
-                   (normalize-dune-stanza
-                    pkg-path
-                    dune-project-stanzas
-                    srcfiles ;; s/b '() ??
-                    stanza))
-                 (cadr stanzas))))
-    ;; normed
-    ;; (format #t "normalized stanzas: ~A\n" normed)
-
-    ;; 'executables' normalizes to a list of 'executable' so we flatten
-    (let ((result (let recur ((stanzas normed))
-                    (if (null? stanzas) '()
-                        (begin
-                          ;; (format #t "  Stanza: ~A\n" (car stanzas))
-                          (if (pair? (caar stanzas))
-                              (concatenate (car stanzas)
-                                           (recur (cdr stanzas)))
-                              (concatenate
-                               `(,(car stanzas))
-                               (recur (cdr stanzas)))))))))
-      ;; (format #t "Renormalized stanzas: ~A\n" result)
-      result)
-    ))
-
-(define (normalize-pkg-tbl pkg-tbl)
-  ;; (format #t "NORMALIZE-PKG-TBL ct: ~A\n" (hash-table-entries pkg-tbl))
-  (let ((pt (for-each (lambda (pkg-kv)
-              ;; (format #t "PKG: ~A\n" (car pkg-kv))
-              (let* ((pkg-path (car pkg-kv))
-                     (pkg-alist (cdr pkg-kv))
-                     ;; (pkg-path (if-let ((pp (assoc :pkg-path pkg-alist)))
-                     ;;                   (cadr pp)
-                     ;;                   ""))
-                     (dune-project-stanzas (read-dune-project-file pkg-path))
-                     (srcfiles (if-let ((s (assoc
-                                            :srcfiles ;;  :ocaml)
-                                            (cdr pkg-kv))))
-                                       s;;(cadr s)
-                                       '())))
-                (if-let ((stanzas-lst (assoc :stanzas pkg-alist)))
-                        (let* ((stanzas (normalize-stanzas
-                                         pkg-path
-                                         dune-project-stanzas
-                                         srcfiles stanzas-lst))
-                               ;; FIXME: update-in! pkg?
-                               (new-pkg (if (null? srcfiles)
-                                            (list
-                                             (list :pkg-path pkg-path)
-                                             (list :dune-project
-                                                   dune-project-stanzas)
-                                             (list :stanzas stanzas))
-                                            ;; else has srcfiles
-                                            (list
-                                             (list :pkg-path pkg-path)
-                                             (list :dune-project
-                                                   dune-project-stanzas)
-                                             (sort-srcfiles srcfiles)
-                                             (list :stanzas stanzas)))))
-                          (hash-table-set! pkg-tbl
-                                           pkg-path
-                                           new-pkg))
-                        ;; else no stanzas == no dunefile, no update
-                        ;; (format #t "NO STANZAS ~A\n" pkg-path)
-                        )))
-                      pkg-tbl)))
-  ;; return updated pkg table
-    pkg-tbl))
-
 (define (pkg-stanzas->public-names-table! pkg-path stanzas pname-tbl)
   ;; (format #t "pkg-stanzas->public-names-table! ~A\n ~A\n"
   ;;         pkg-path stanzas)
@@ -371,6 +292,7 @@
          ((:library)
           (let* (;;(modname (assoc-in '(:name :module) stanza-alist))
                  (privname (assoc-in '(:name :private) stanza-alist))
+                 (modname (normalize-module-name (cadr privname)))
                  (pubname (assoc-in  '(:name :public) stanza-alist))
                  (label (string-append
                          "//" pkg-path ":"
@@ -379,11 +301,15 @@
                              (symbol->string (cadr privname)))))
 
                  (entry (if (and privname pubname)
-                            `((:privname ,(cadr privname))
-                              (:pubname ,(cadr pubname))
+                            `((:private ,(cadr privname))
+                              (:public ,(cadr pubname))
+                              (:module ,modname)
+                              (:pkg ,pkg-path)
                               (:label ,label))
                             ;; else privname only
-                            `((:privname ,(cadr privname))
+                            `((:private ,(cadr privname))
+                              ;; set pubname <= privname?
+                              (:pkg ,pkg-path)
                               (:label ,label)))))
             ;; (format #t "    modname: ~A\n" modname)
             ;; (format #t "    privname: ~A\n" privname)
@@ -391,6 +317,7 @@
 
             ;; we always have a privname?
             (hash-table-set! pname-tbl (cadr privname) entry)
+            (hash-table-set! pname-tbl modname entry)
 
             (if pubname
                 (hash-table-set! pname-tbl (cadr pubname) entry))
@@ -417,10 +344,11 @@
      (cadr stanzas)))
 
 ;; initialize names lookup table. maps names to names and label, e.g.
-;; private-name to public-name, public-name to bazel target label.
+;; one entry per name (private, public, module), values overlap
+;; so we can easily find label for any of the three
 ;; used by e.g. lib 'select' LHS resolution.
-;; FIXME: better names
-(define (libdeps->public-names-table dune-pkg-tbls)
+;; FIXME: better naming
+(define (libdeps->names-ht dune-pkg-tbls)
   (let ((pname-tbl (make-hash-table)))
     (for-each (lambda (pkg-tbl)
                 ;;(format #t "PKG-TBL: ~A\n" (car pkg-tbl))
@@ -428,13 +356,14 @@
                 (for-each (lambda (pkg)
                             ;; pkg: (<pkg-path> <pkg-list>)
                             ;;(format #t "PKG: ~A\n" (car pkg))
-                            (if-let ((stanzas (assoc :stanzas (cdr pkg))))
-                                    (pkg-stanzas->public-names-table!
-                                     (car pkg)
-                                     stanzas pname-tbl)
+                            (let ((stanzas (assoc :stanzas (cdr pkg))))
+                              (if (cadr stanzas)
+                                  (pkg-stanzas->public-names-table!
+                                   (car pkg)
+                                   stanzas pname-tbl)
 
-                                    ;; else skip - pkg w/o dune stanzas
-                                    ))
+                                  ;; else skip - pkg w/o dune stanzas
+                                  )))
                           (cadr pkg-tbl)))
               dune-pkg-tbls)
     pname-tbl))

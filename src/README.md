@@ -2,6 +2,9 @@
 
 most of this C code has been replaced by Scheme code.
 
+FIXME: glob.c is extracted from libc_s7.c, from when we were not using
+that. Now we've integrated it so glob.c can be removed?
+
 Original C code:
 
 * `tools_obazl/src/lib/obazl_codept` crawl the fs to get src files,

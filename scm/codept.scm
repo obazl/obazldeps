@@ -3,6 +3,8 @@
 (load "opam.scm")
 (load "utils.scm")
 
+(define codept-cmd "/Users/gar/.opam/4.14.0/bin/codept")
+
 ;; task: list all src files in each pkg
 ;; task: put namespaced modules in codept "group"
 
@@ -20,18 +22,23 @@
 
 ;; return both .ml and .mli files, with path
 ;; FIXME: we can have a module w/o srcfiles, if the module is generated
-(define (module-name->file-paths m-name path srcfiles)
-  ;; (newline)
-  (if (null? srcfiles)
-      ;; (if (symbol? m-name)
-      ;;     (string-append (symbol->string m-name) ".ml,")
-      ;;     (string-append m-name ".ml,"))
-      "" ;; non-existent files break codept
-      (if (module-name-equal? m-name (car srcfiles))
-          (string-append path "/" (car srcfiles)
-                         ","
-                         (module-name->file-paths m-name path (cdr srcfiles)))
-          (module-name->file-paths m-name path (cdr srcfiles)))))
+;; returns pair of mlfile, mlifile, in either order, "" is missing
+(define (module-name->file-paths m-name path ocaml-srcs)
+  ;; (format #t "module-name->file-paths ~A:: ~A\n" path m-name)
+  (let recur ((srcs ocaml-srcs)
+              (m1 #f)
+              (m2 #f))
+    (if (null? srcs)
+        (values (if m1 m1 "") (if m2 m2 ""))
+
+        ;; else
+        (if (module-name-equal? m-name (car srcs))
+            (if m1
+                (values m1 (string-append path "/" (car srcs)))
+                (recur (cdr srcs)
+                       (string-append path "/" (car srcs))
+                       m2))
+            (recur (cdr srcs) m1 m2)))))
 
 (define (module-name->file-names m-name srcfiles)
   ;; (newline)
@@ -45,72 +52,87 @@
 ;;;;;;;;;;;;;;;; executable (singular)
 ;; for dune, the 'public_name' field means "install to system /bin
 ;; under this name".  for obazl we do not install anything.
-(define (codept-emit-exec-args fs-path stanza srcfiles out-port)
-  (format #t "codept-emit-exec-args ~A: ~A\n" fs-path stanza)
+(define (codept-emit-exec-args fs-path stanza ocaml-srcs out-port)
+  ;; (format #t "codept-emit-exec-args ~A: ~A\n" fs-path stanza)
   (let* ((nm (cadr (assoc :name (cadr stanza))))
-         ;; (public_nm (if-let ((pn (assoc 'public_name (cdr stanza))))
-         ;;                    (cadr pn)
-         ;;                    '()))
-         (ms (if-let ((ms (assoc 'modules (cdr stanza))))
+         (stanza-alist (cadr stanza))
+         (ms (if-let ((ms (assoc :modules stanza-alist)))
                      (if (null? (cdr ms))
                          (begin
-                           (display
-                            (format #f "WARNING: empty library: ~A:~A"
-                                    fs-path nm)) (newline)
-                            '())
-                         (cdr ms))
+                           (format #t "WARNING: empty library: ~A:~A\n"
+                                   fs-path nm)
+                           '())
+                         (cadr ms))
                      '())))
+    ;; (format #t "exec modules: ~A\n" ms)
     (if (null? ms)
+        ;; no explicit modules: emit all srcfiles
         (begin
           ;; (display (format #f "MODS: :standard (implicit)")) (newline)
-          ;; (display (format #f "SRCS: ~A" srcfiles)) (newline)
-
-          ;; (format out-port "~A[" nm)
+          ;; (display (format #f "SRCS: ~A" ocaml-srcs)) (newline)
           (for-each (lambda (f)
-                      (format out-port "~A"
-                             (string->symbol
-                              (string-append fs-path "/" f)))
-                      (newline out-port))
-                    srcfiles)
-            ;; (format out-port "]")
-            (newline out-port))
+                      (let ((fpath (string-append fs-path "/" f)))
+                        (if (not (hash-table-ref emitted-files fpath))
+                            (begin
+                              (format out-port "~A" fpath)
+                              (newline out-port)
+                              (hash-table-set! emitted-files fpath #t)))))
+                    ocaml-srcs))
+          ;; (newline out-port))
 
-        ;; pluck module->file from srcfiles
+        ;; else we have explicit modules list
         (begin
           ;; (display (format #f "MODS: ~A" ms)) (newline)
-          ;; (display (format #f "SRCS: ~A" srcfiles)) (newline)
+          ;; (display (format #f "SRCS: ~A" ocaml-srcs)) (newline)
 
           ;; (format out-port "~A[" nm)
-          (for-each (lambda (m)
-                      ;; (modules) entries may be: sym, (:standard ...) etc.
-                      ;; (modules (:standard)) == same as omitting? i.e. all
-                      ;; (file-for-module m srcfiles)
+          (for-each (lambda (dep-kv)
+                      ;; (if (equal? :direct (cadr dep-kv)
 
-                      (if (pair? m)
-                          "FIXME"
-                          (if (or (symbol? m) (string? m))
-                              (begin
-                                (format out-port "~A"
-                                        ;; (string->symbol
-                                        ;; (string-append fs-path "/"
-                                        (module-name->file-paths m fs-path srcfiles)))
-                              "FIXME2")))
-                    ms)
+                      (let-values
+                          (((m1 m2)
+                                (module-name->file-paths
+                                 (car dep-kv)
+                                 fs-path ocaml-srcs)))
+                        ;; (format #t "m1: ~A\n" m1)
+                        ;; (format #t "m2: ~A\n" m2)
+                        (if m1
+                            (if (not (hash-table-ref emitted-files m1))
+                                (begin
+                                  (format out-port "~A" m1)
+                                  (newline out-port)
+                                  (hash-table-set! emitted-files
+                                                   m1 #t))))
+                        (if m2
+                            (if (not (hash-table-ref emitted-files m2))
+                                (begin
+                                  (format out-port "~A" m2)
+                                  (newline out-port)
+                                  (hash-table-set! emitted-files
+                                                   m2 #t)))))
+                      )
+
+                      ;; (format out-port "~A"
+                      ;;         ;; (string->symbol
+                      ;;         ;; (string-append fs-path "/"
+                      ;;         (module-name->file-paths m fs-path ocaml-srcs))
+                      ;; )
+                    ms))
           ;; (format out-port "]")
-          (newline out-port))
+          ;; (newline out-port))
         )
     )
   )
 
-(define (codept-emit-executable-args fs-path exec-stanzas srcfiles out-port)
- (format #t "codept-emit-executable-args fs-path: ~A\n" fs-path)
+(define (codept-emit-executable-args fs-path exec-stanzas ocaml-srcs out-port)
+ ;; (format #t "codept-emit-executable-args fs-path: ~A\n" fs-path)
   ;; (newline)
   ;; (display (format #f "codept-emit-executable-args exec-stanzas: ~A" exec-stanzas))
   ;; (newline)
   (if (not (null? exec-stanzas))
       (begin
         (for-each (lambda (stanza)
-                    (codept-emit-exec-args fs-path stanza srcfiles out-port))
+                    (codept-emit-exec-args fs-path stanza ocaml-srcs out-port))
                   exec-stanzas)))
       ;; (begin (display (format #f "  no library stanzas for ~A" fs-path)) (newline)))
   )
@@ -124,7 +146,7 @@
 ;; Q: what does empty '(modules)' mean? all or none? presumably the latter
 (define (codept-emit-execs-nm-arg fs-path nm stanza srcfiles out-port)
   ;; EFFICIENCY: we only need to pull the non-names fields once
-  (let* ((ocaml-srcs (cadr (assoc :ocaml srcfiles)))
+  (let* ((ocaml-srcs (cadr (assoc-in '(:ocaml :static) srcfiles)))
          (modules (if-let ((modules (assoc 'modules (cdr stanza))))
                      (if (null? (cdr modules))
                          (begin
@@ -147,7 +169,7 @@
     diff))
 
 (define (codept-emit-execs-modules-args fs-path stanza srcfiles out-port)
-  (let* ((ocaml-srcs (cadr (assoc :ocaml srcfiles)))
+  (let* ((ocaml-srcs (cadr (assoc-in '(:ocaml :static) srcfiles)))
          (modules (if-let ((modules (assoc 'modules (cdr stanza))))
                      (if (null? (cdr modules))
                          (begin
@@ -185,30 +207,32 @@
     )
   )
 
-(define (codept-emit-executables-args fs-path execs-stanzas srcfiles out-port)
-  ;; (display (format #f "codept-emit-executables-args ~A" fs-path)) (newline)
-  (if (null? execs-stanzas)
-      '()
-      (for-each
-       (lambda (stanza)
-         ;; each executables stanza may contain multiple exec names
-         (let* ((nms (cdr (assoc 'names (cadr stanza)))))
-           (for-each (lambda (nm)
-                       (codept-emit-execs-nm-arg fs-path nm stanza srcfiles out-port))
-                     nms))
-         ;; modules apply to all names, so emit only once
-         (codept-emit-execs-modules-args fs-path stanza srcfiles out-port)
-         )
-       execs-stanzas)))
+;; (define (codept-emit-executables-args fs-path execs-stanzas srcfiles out-port)
+;;   ;; (display (format #f "codept-emit-executables-args ~A" fs-path)) (newline)
+;;   (if (null? execs-stanzas)
+;;       '()
+;;       (for-each
+;;        (lambda (stanza)
+;;          ;; each executables stanza may contain multiple exec names
+;;          (let* ((nms (cdr (assoc 'names (cadr stanza)))))
+;;            (for-each (lambda (nm)
+;;                        (codept-emit-execs-nm-arg fs-path nm stanza srcfiles out-port))
+;;                      nms))
+;;          ;; modules apply to all names, so emit only once
+;;          (codept-emit-execs-modules-args fs-path stanza srcfiles out-port)
+;;          )
+;;        execs-stanzas)))
 
 ;; WARNING: for now, ignore libs with empty `(modules)`. We have some
 ;; example, tezos/src/lib_protocol_environment/s_packer/dune,
 ;; src/tooling/dune where it is used to make a "placeholder" needed to
 ;; install (and elsewhere use) an executable in the system
 ;; <prefix>/libexec dir.
+;; emitted-files: cache to avoid dups
+(define emitted-files (make-hash-table))
 (define (codept-emit-lib-args fs-path stanza srcfiles out-port)
-  (format #t "codept-emit-lib-args: ~A\n" fs-path)
-  ;; (format #t "    stanza: ~A\n" stanza)
+  ;; (format #t "codept-emit-lib-args: ~A\n" fs-path)
+  ;; (format #t "  lib stanza: ~A\n" stanza)
   ;; (let ((modules (assoc-in '(:modules :direct) (cadr stanza))))
   ;;   (format #t "  Stanza: ~A\n" stanza)
   ;;   (format #t "  Modules: ~A\n" modules))
@@ -225,7 +249,7 @@
 
          (privname  (cadr (assoc-in '(:name :private) stanza-alist)))
 
-         ;; root_module? - a generated resolver module, so no deps
+         ;; root_module? - a generated resolver module for 'libraries' deps
 
          ;; modules_without_implementation - included in default :all,
          ;; must be added in case of (modules...) field, to get namespacing
@@ -244,16 +268,25 @@
          ;;                          '()))
 
          ;; :direct modules correspond to srcfiles
-         (direct-modules (if-let ((direct-modules (assoc-in
-                                     '(:modules :direct)
-                                     (cadr stanza))))
-                     (if (null? direct-modules)
+         ;; (direct-modules (if-let ((direct-modules (assoc-in
+         ;;                             '(:modules :direct)
+         ;;                             (cadr stanza))))
+         ;;             (if (null? direct-modules)
+         ;;                 (begin
+         ;;                   (display
+         ;;                    (format #f "WARNING: empty library: ~A:~A"
+         ;;                            fs-path privname)) (newline)
+         ;;                    '())
+         ;;                 (cadr direct-modules))
+         ;;             '()))
+
+         (ms (if-let ((ms (assoc :submodules stanza-alist)))
+                     (if (null? (cdr ms))
                          (begin
-                           (display
-                            (format #f "WARNING: empty library: ~A:~A"
-                                    fs-path privname)) (newline)
-                            '())
-                         (cadr direct-modules))
+                           (format #t "WARNING: empty library: ~A:~A\n"
+                                   fs-path nm)
+                           '())
+                         (cadr ms))
                      '()))
 
          ;; (_ (if (equal? fs-path "src/lib_protocol_environment/sigs")
@@ -268,8 +301,8 @@
          ;;          (if (null? (cdr mwis)) '() (cdr mwis))
          ;;          '()))
          )
-
-    (if (null? direct-modules)
+    ;; (format #t "lib ms: ~A\n" ms)
+    (if (null? ms) ;; direct-modules)
         ;; default: all direct-modules (files) in directory
         ;; FIXME: exclude modules_without_implementation?
 
@@ -281,9 +314,14 @@
               (format out-port "~A[" privname)
               (for-each (lambda (f)
                           ;; if f not in modules_without_implementation?
-                          (format out-port "~A"
-                                  (string->symbol
-                                   (string-append fs-path "/" f ","))))
+                          (let ((fpath (string-append fs-path "/" f)))
+                            (format #t "EMITTING: ~A\n" fpath)
+                            (if (not (hash-table-ref emitted-files fpath))
+                                (begin
+                                  (format out-port "~A"
+                                          (string-append fpath ","))
+                                  (hash-table-set! emitted-files
+                                                   fpath #t)))))
                         ocaml-srcs)
               (format out-port "]")
               (newline out-port))
@@ -301,8 +339,8 @@
 
           ;; (format out-port "-open\n~A\n" privname)
           (format out-port "~A[" privname)
-          (for-each (lambda (m)
-                      ;; (format #t "M: ~A\n" m)
+          (for-each (lambda (dep-kv)
+                      ;; (format #t "dep-kv: ~A\n" dep-kv)
                       ;; (format #t "path: ~A\n"
                       ;;         (module-name->file-paths
                       ;;                  m fs-path ocaml-srcs))
@@ -310,23 +348,34 @@
                       ;; (modules (:standard)) == same as omitting? i.e. all
                       ;; (file-for-module m srcfiles)
 
-                      (if (pair? m)
-                          "FIXME"
-                          (if (or (symbol? m) (string? m))
-                              (format out-port "~A"
-                                      ;; (string->symbol
-                                       ;; (string-append fs-path "/"
-                                      (module-name->file-paths
-                                       m fs-path ocaml-srcs)) ;;)
+                      (let-values
+                          (((m1 m2)
+                            (module-name->file-paths
+                             (car dep-kv) fs-path ocaml-srcs)))
+                        ;; (format #t "m1: ~A\n" m1)
+                        ;; (format #t "m2: ~A\n" m2)
+                        (if m1
+                            (if (not (hash-table-ref emitted-files m1))
+                                (begin
+                                  (format out-port "~A"
+                                          (string-append m1 ","))
+                                  (hash-table-set! emitted-files
+                                                   m1 #t))))
+                        (if m2
+                            (if (not (hash-table-ref emitted-files m2))
+                                (begin
+                                  (format out-port "~A"
+                                          (string-append m2 ","))
+                                  (hash-table-set! emitted-files
+                                                   m2 #t))))))
 
-                              "FIXME2")))
                     ;; "Note that the modules_without_implementation
                     ;; field is not merged in modules...". But we need
                     ;; to analyse their dependencies anyway, so we add
                     ;; them to codept args. The docs do not say
                     ;; whether such "modules" are namespaced; we
                     ;; assume yes.
-                    direct-modules)
+                    ms) ;; direct-modules)
                     ;; (concatenate modules
                     ;;              modules-without-impl
                     ;;              private-modules))
@@ -343,19 +392,18 @@
     )
   )
 
-(define (codept-emit-library-args fs-path lib-stanzas srcfiles out-port)
+(define (codept-emit-library-args fs-path lib-stanzas ocaml-srcs out-port)
   ;; (if (equal? fs-path "src/lib_protocol_environment/sigs")
   ;;     (format #t " EMIT sigs stanza: ~A\n" lib-stanzas))
   ;; (format #t "codept-emit-library-args fs-path: ~A\n" fs-path)
   ;; (display (format #f "codept-emit-library-args lib-stanzas: ~A" lib-stanzas))
-  ;; (newline)
   (if (not (null? lib-stanzas))
-      ;; only emit args for srcfiles
-      ;; (if-let ((srcs (assoc :ocaml srcfiles)))
-      (if srcfiles
+      ;; only emit args for ocaml-srcs
+      ;; (if-let ((srcs (assoc :ocaml ocaml-srcs)))
+      (if ocaml-srcs
           (for-each (lambda (stanza)
                       (codept-emit-lib-args fs-path stanza
-                                            srcfiles out-port))
+                                            ocaml-srcs out-port))
                   lib-stanzas)
         )
         )
@@ -365,20 +413,23 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; entry point
 (define (dune-emit-codept-args dune-pkg-tbls out-port)
-  ;; FIXME: support multiple dune-pkg-tbls
+  (format #t "dune-emit-codept-args\n")
   (for-each
    (lambda (dune-pkg-tbl)
      (for-each
       (lambda (pkg-kv)
         (let* ((fs-path (car pkg-kv))
-               (stanzas-assoc (assoc :stanzas (cdr pkg-kv))))
+               ;; pkg w/o stanza returns (:stanzas #f):
+               (stanzas-assoc (assoc :stanzas (cdr pkg-kv)))
+               )
           ;; (format #t "fs-path: ~A\n" fs-path)
           ;; (if (equal? fs-path "src/lib_protocol_environment/sigs")
-          ;;     (format #t " stanzas: ~A\n" stanzas-assoc))
-          (if stanzas-assoc ;; assoc returns #f if not found
+          ;; (format #t " stanzas: ~A\n" stanzas-assoc)
+          ;; )
+          (if (cadr stanzas-assoc)
               (let ((stanzas (cadr stanzas-assoc))
-                    (srcfiles (if-let ((srcs
-                                        (assoc-in '(:srcfiles :ocaml)
+                    (ocaml-srcs (if-let ((srcs
+                                        (assoc-in '(:srcfiles :ocaml :static)
                                                   (cdr pkg-kv))))
                                       (cadr srcs)
                                       '()))
@@ -389,7 +440,7 @@
           ;; (display (format #f "stanzas: ~A" stanzas))
           ;; (newline)
 
-          ;; (display (format #f "srcfiles: ~A" srcfiles))
+          ;; (display (format #f "ocaml-srcs: ~A" ocaml-srcs))
           ;; (newline)
 
           ;; (display (format #f " libraries: ~A"
@@ -398,27 +449,21 @@
 
           (let ((lib-stanzas (assoc+ :library stanzas)))
             (if (not (null? lib-stanzas))
-                (codept-emit-library-args fs-path lib-stanzas srcfiles out-port)))
+                (codept-emit-library-args fs-path lib-stanzas ocaml-srcs out-port)))
 
           (let ((exec-stanzas (assoc+ :executable stanzas)))
             ;; (format #t "ASSOC+ execs: ~A\n" exec-stanzas)
             (if (not (null? exec-stanzas))
                 (begin
-                  (codept-emit-executable-args fs-path exec-stanzas srcfiles out-port))))
+                  (codept-emit-executable-args fs-path exec-stanzas ocaml-srcs out-port))))
 
-          (let ((execs-stanzas (assoc+ 'executables stanzas)))
-            (if (not (null? execs-stanzas))
-                (codept-emit-executables-args fs-path execs-stanzas srcfiles out-port)
-                  ;; (for-each (lambda (execs-stanza)
-                  ;;             (display (format #f " EXECUTABLES: ~A: ~A"
-                  ;;                              fs-path
-                  ;;                              execs-stanza
-                  ;;                              ;; (alist-delete 'files (cdr execs-stanza))
-                  ;;                              ))
-                  ;;             (newline)
-                  ;;             )
-                  ;;           execs-stanzas)
-                  ))
+          (let ((test-stanzas (assoc+ :test stanzas)))
+            (if (not (null? test-stanzas))
+                (codept-emit-executable-args fs-path test-stanzas ocaml-srcs out-port)))
+
+          ;; (let ((execs-stanzas (assoc+ 'executables stanzas)))
+          ;;   (if (not (null? execs-stanzas))
+          ;;       (codept-emit-executables-args fs-path execs-stanzas ocaml-srcs out-port)))
 
           ;; (display (format #f " executables: ~A"
           ;;                  (assoc+ :executables stanzas)))
@@ -519,25 +564,86 @@
   )
 
 ;; FIXME: predicate for modules in the std distrib?
+;; prob: %{lib:stdlib:camlinternalFormatBasics.cmi}
+(define opam-root "/Users/gar/.opam")
+;; (getenv "OPAMROOT") ;;  ".opam")
+
+(define opam-switch "4.14.0") ;; "tezos")
+
+;; codept-stdlib-cmd analyzes "stdlib" in lib/ocaml
+(define codept-stdlib-cmd
+  (string-append codept-cmd " -k -sexp "
+                 opam-root "/" opam-switch
+                 "/lib/ocaml/*.m* 2> /dev/null"))
+
+(system codept-stdlib-cmd #t)
+
+  ;; (string-append "codept -k -sexp "
+  ;;                opam-root "/" opam-switch
+  ;;                "/lib/ocaml/*.m* 2> /dev/null"))
+
+(define codept-bin-cmd
+  (string-append "opam var bin"))
+
+  ;; (string-append
+  ;;  "opam var bin --root " opam-root " --switch " opam-switch))
+
 (define (make-stdlib-tbl)
-  (let* ((stdlib-tbl (make-hash-table))
-         (sexp-str (system "codept -k -sexp /Users/gar/.opam/4.10/lib/ocaml/*.m* 2> /dev/null" #t))
-         (sexp (with-input-from-string sexp-str read)))
+  ;; (format #t "make-stdlib-tbl\n")
+  (define stdlib-tbl (make-hash-table))
+  (define executables-tbl (make-hash-table))
+  (let* ((sexp-str (system codept-stdlib-cmd #t))
+         ;; (_ (format #t "sexp-str: ~A\n" sexp-str))
+         (codept-stdlib-sexp (with-input-from-string sexp-str read))
+         ;; add opam "binaries" (executables)
+         (opam-bin-dir (string-right-trim " \n" (system codept-bin-cmd #t)))
+         (_ (format #t "bindir: ~A\n" opam-bin-dir))
+         (execs (directory->list opam-bin-dir)))
+
+    ;; enumerate modules from codept-stdlib-sexp 'local' assoc
     (for-each (lambda (module)
                 ;; module:  ((module (String)) ...)
-                (format #t "stdlib module: ~A\n" module)
+                ;; (format #t "stdlib module: ~A\n" module)
                 (hash-table-set! stdlib-tbl (caadar module) #t)
                 )
-              (codept->local-modules sexp))
-    stdlib-tbl))
+              (codept->local-modules codept-stdlib-sexp))
+
+    ;; opam executables. dune code may refer to these with prefixes
+    ;; ':' or 'bin:', so we add entries for each of these.
+    (for-each (lambda (exe)
+                (if (and (not (equal? exe "."))
+                         (not (equal? exe "..")))
+                    (begin
+                      (hash-table-set! executables-tbl
+                                       (string->symbol exe)
+                                       (string-append
+                                        "@ocaml//:" exe))
+                      ;; with prefix 'bin:'
+                      ;; FIXME: we could just drop the prefix for lookup?
+                      (hash-table-set! executables-tbl
+                                       (string->symbol
+                                        (string-append "bin:" exe))
+                                       (string-append
+                                        ;;FIXME: make it @ocaml//bin: ?
+                                        "@ocaml//:" exe))
+                      ;; colon pfx, for e.g. (action (run %{ocamlc} ...))
+                      ;;FIXME: do we really need this?
+                      (hash-table-set! executables-tbl
+                                       (string->symbol
+                                        (string-append ":" exe))
+                                       (string-append
+                                        "@ocaml//:" exe))
+                      )))
+              execs)
+    (values stdlib-tbl executables-tbl)))
 
 ;; e.g. String, Printf, List, Format, etc.
-(define (filter-module-deps deps)
-  ;; (format #t "filter-module-deps ~A\n" deps)
+(define (remove-stdlib-deps deps)
+  ;; (format #t "remove-stdlib-deps ~A\n" deps)
   ;; remove stdlib deps
   (if (null? deps)
       '()
-      (let recur ((deps (cadar deps))
+      (let recur ((deps deps)
                   (clean '()))
         ;; (format #t "car deps: ~A\n" (caar deps))
         ;; (format #t "car deps stdlib?: ~A\n" (stdlib-tbl (caar deps)))
@@ -545,32 +651,55 @@
             (begin
               ;; (format #t "Done: ~A\n" clean)
               clean)
-            (if-let ((m (stdlib-tbl (caar deps))))
-                    (recur (cdr deps) clean)
-                    (recur (cdr deps) (cons (car deps) clean)))))))
+            (if (> (length (car deps)) 1)
+                (recur (cdr deps) (cons (car deps) clean))
+                (if-let ((m (stdlib-tbl (caar deps))))
+                        (recur (cdr deps) clean)
+                        (recur (cdr deps) (cons (car deps) clean))))))))
 
-(define (codept-srcfile->depslist srcfile codept-sexp)
-  (let* ((deps-alist (codept->file-deps codept-sexp))
-         (deps (let recur ((deps deps-alist))
-                 (if (null? deps)
-                     '()
-                     (let* ((dep (car deps))
-                            ;; dep: ((file <path>) (deps ...))
-                            (f (cadar dep)))
-                       ;; (format #t "dep-item: ~A\n" dep)
-                       ;; (format #t "dep-item f: ~A\n" f)
-                       (if (equal srcfile (symbol->string f))
-                           (filter-module-deps (cdr dep))
-                           (recur (cdr deps))))))))
-    deps))
+(define (dune->filedeps-tbl codept-sexp)
+  (let* ((deps-alists (codept->file-deps codept-sexp))
+         (filedeps-tbl (make-hash-table (length deps-alists))))
+    ;; deps-alists: list of alists with keys 'file, 'deps
+    (for-each (lambda (dep)
+                ;;((file src/foo/bar.ml) (deps ((A B) (C))))
+                (let* ((f (assoc 'file dep))
+                       (modname (file-name->module-name
+                                 (symbol->string (cadr f))))
+                       (deps (assoc 'deps dep))
+                       (deps (if deps
+                                 (remove-stdlib-deps (cadr deps))
+                                 '())))
+                  ;; (format #t "file:     ~A\n" f)
+                  ;; (format #t "filedeps: ~A\n" deps)
+                  (hash-table-set! filedeps-tbl
+                                   (symbol->string (cadr f))
+                                   (if deps
+                                       `((:deps ,deps)
+                                         (:file ,(symbol->string (cadr f)))
+                                         (:module ,modname))
+                                       '()))))
+              deps-alists)
+    filedeps-tbl))
 
-(define (-basename path)
-  (let ((last-slash (string-index-right path (lambda (c) (eq? c #\/)))))
-    (string-drop path (+ last-slash 1))))
-
-(define (-dirname path)
-  (let ((last-slash (string-index-right path (lambda (c) (eq? c #\/)))))
-    (string-take path last-slash)))
+;; (define (codept-srcfile->depslist srcfile codept-sexp)
+;;   ;; (format #t "srcfile: ~A\n" srcfile)
+;;   ;; FIXME: preproc convert deps-alist to hash-table
+;;   (let* ((deps-alist (codept->file-deps codept-sexp)))
+;;     (if (equal? srcfile 'src/proto_009_PsFLoren/lib_protocol/alpha_context.ml)
+;;         (format #t "alpha_context.ml deps: ~A\n" deps-alist))
+;;     (let ((deps (let recur ((deps deps-alist))
+;;                  (if (null? deps)
+;;                      '()
+;;                      (let* ((dep (car deps))
+;;                             ;; dep: ((file <path>) (deps ...))
+;;                             (f (cadar dep)))
+;;                        ;; (format #t "dep-item: ~A\n" dep)
+;;                        ;; (format #t "dep-item f: ~A\n" f)
+;;                        (if (equal srcfile (symbol->string f))
+;;                            (remove-stdlib-deps (cdr dep))
+;;                            (recur (cdr deps))))))))
+;;       deps)))
 
 (define (filename->openers ns filename)
   ;; (format #t "filename->openers: ~A :: ~A\n" ns filename)
@@ -905,3 +1034,199 @@
 ;;     ;;                  (hash-table-entries modules-table)))
 ;;     ;; (newline)
 
+
+;; suppose foo/bar is a workspace. then just crawling foo/bar from
+;; proj root would use the wrong base dir. passing (foo/bar . ".")
+;; will treat foo/bar as base dir. to process just foo/bar/a and
+;; foo/bar/b, pass (foo/bar . '("a" "b"))
+;; write codept.args, then process to produce codept.deps
+(define (path->group-tag path)
+  (string-tr path #\/ #\.))
+
+(define* (->codept root . dirs)
+  (format #t "->CODEPT root: ~A dirs: ~A\n" root dirs)
+  (if (not (null? dirs))
+      (if (not (pair? dirs))
+          (error 'bad-arg
+                 (format #f "second arg to 'crawl' must be a list of dirs\n"))))
+
+  (if (not (file-exists? ".obazl.d/tmp"))
+      (system "mkdir -p .obazl.d/tmp"))
+  (let ((outp
+         (open-output-file ".obazl.d/tmp/codept.args")))
+
+    ;; if no dirs passed, set root to ./ and dirs to root
+    (let ((root (if (null? dirs) "." root))
+          (dirs (if (null? dirs) (list root) dirs)))
+
+      ;; (format #t "root: ~A, dirs: ~A\n" root dirs)
+
+      (for-each
+       (lambda (dir)
+         (format #t "root ~A, dir ~A\n" root dir)
+         (if (char=? #\/ (string-ref dir 0))
+             (error 'wrong-type-arg "paths must be relative"))
+         (if (not (directory? dir))
+             (error 'wrong-type-arg
+                    (string-append "Not a directory: " dir)))
+
+         ;; we will recur on subdirs, so we need a new root
+         (let recur-dir ((subroot root)
+                         (dir dir))
+           ;; (format #t "recurring on ~A/~A\n" subroot dir)
+           (if (null? dir)
+               (begin
+                 ;; this should never happen, we only recur when we
+                 ;; have a dir
+                 (error 'null-dir (format #f "unexpected null dir\n")))
+
+               (let* ((path
+                       (if (equal? subroot ".")
+                           dir
+                           (string-append subroot "/" dir)))
+                      (dirents (sort! (directory->list path) string<?))
+                      (files
+                       ;; rm ".", "..", "bazel-*", hidden dirs
+                       (filter (lambda (dentry)
+                                 (not (or (equal? ".." dentry)
+                                          (equal? "." dentry)
+                                          (string-prefix? "." dentry)
+                                          (string-prefix? "bazel-" dentry))))
+                               (cddr dirents)))
+                      (subdirs (filter (lambda (f)
+                                         (directory?
+                                          (string-append path "/" f)))
+                                       files))
+                      (ocaml-srcs (filter (lambda (f)
+                                            (or (string-suffix? ".ml" f)
+                                                (string-suffix? ".mli" f)))
+                                          files))
+                      (modules (map file-name->module-name
+                                 (filter (lambda (f)
+                                           (string-suffix? ".ml" f))
+                                         files)))
+                      (sigs (map file-name->module-name
+                                 (filter (lambda (f)
+                                           (string-suffix? ".mli" f))
+                                         files)))
+                      )
+                 ;; (format #t "path: ~A\n" path)
+                 ;; (format #t "subdirs: ~A\n" subdirs)
+                 (if files
+                     (let ((group (if (equal? "." path) "_ROOT"
+                                      (path->group-tag path))))
+                       (if (not (string-prefix? "testsuite" group))
+                           (begin
+                             ;; first do all files in dir
+                             (if (not (and (null? modules) (null? sigs)))
+                                 (let ((fpaths (map (lambda (f)
+                                                      (string-append path "/" f))
+                                                    ocaml-srcs)))
+                                   (format outp "~A[" (string-tr group #\/ #\_))
+                                   (format outp "~A"
+                                           (string-join fpaths ","))
+                                   ;; (for-each (lambda (f)
+                                   ;;             (if (or (string-suffix? ".mli" f)
+                                   ;;                     (string-suffix? ".ml" f))
+                                   ;;                 (format outp "~A/~A," path f)
+                                   ;;                 ;; else nop
+                                   ;;                 ))
+                                   ;;           files)
+                                   (format outp "]\n")
+                                   )
+                                 )
+                             ;; then recur in subdirs
+                             (for-each (lambda (subdir)
+                                         (recur-dir path subdir))
+                                       subdirs))
+                           ;; skip testsuite subdirs, sth in there chokes codept
+                           ))
+                     ;; no more files, so no recursion
+                     )))))
+       ;; for each dir
+       (if (null? dirs) (list ".") dirs)))
+    (close-output-port outp))
+
+  (format #t "running codept\n")
+
+  ;; now run codept to produce codept.deps
+  (system (string-append "codept -expand-deps -sexp -k "
+                         "-args .obazl.d/tmp/codept.args "
+                         "> .obazl.d/tmp/codept.deps "
+                         "2> .obazl.d/tmp/codept.log"))
+
+  ;; and now analyze codept.deps
+  (let* ((codept-sexp (read-codept-depsfile ".obazl.d/tmp/codept.deps"))
+         (_ (format #t "codept-sexp: ~A\n" codept-sexp))
+         (codept-alist (cdr codept-sexp))
+         (locals-assoc (assoc 'local codept-alist))
+         (locals-alist-list (cadr locals-assoc))
+
+         (deps-alist (cadr (assoc 'dependencies codept-alist)))
+         (modules-tbl (make-hash-table))
+         (deps-tbl (make-hash-table)))
+    ;; each alist in locals-alist-list: keys module, ml, mli
+    ;; (format #t "locals-alist-list: ~A\n" locals-alist-list)
+    (for-each (lambda (local-dep)
+                (let* ((file-assoc (assoc 'file local-dep))
+                       (fpath (cadr file-assoc))
+                       (deps-assoc (assoc 'deps local-dep))
+                       (deps-list (if deps-assoc
+                                      (cadr deps-assoc)
+                                      '())))
+                  (format #t "file-assoc: ~A\n" file-assoc)
+                  (format #t "fpath: ~A\n" fpath)
+                  (format #t "deps-assoc: ~A\n" deps-assoc)
+                  (format #t "deps-list: ~A\n" deps-list)
+                  (if-let ((e (hash-table-ref modules-tbl fpath)))
+                          (begin ;; update old entry
+                            (if (list? e)
+                                (hash-table-set! modules-tbl fpath
+                                                 (cons deps-list e))
+                                (hash-table-set! modules-tbl fpath
+                                                 (list deps-list e))))
+                          ;; else new entry
+                          (begin
+                            ;; (format #t "adding ~A\n" mname)
+                            (hash-table-set! modules-tbl fpath
+                                             deps-list)))))
+
+              deps-alist)
+    modules-tbl))
+
+;; (define modules-tbl (->codept "."))
+
+;; (for-each (lambda (e)
+;;             (format #t "~A\n" e))
+;;           modules-tbl)
+
+;; (hash-table-entries mtbl)
+
+;; (for-each (lambda (local-alist)
+;;                 (let* ((module-assoc (assoc 'module local-alist))
+;;                        (module (cadr module-assoc))
+;;                        (ml (assoc 'ml local-alist))
+;;                        (mli (assoc 'mli local-alist))
+;;                        (mname (if (pair? module)
+;;                                   (car (reverse module))
+;;                                   module))
+;;                        (mpkg (if (pair? module)
+;;                                  (reverse (cdr (reverse module)))
+;;                                  #f)))
+;;                   (format #t "module-assoc: ~A\n" module-assoc)
+;;                   (format #t "module: ~A\n" module)
+;;                   (format #t "mname: ~A, mpkg: ~A\n" mname mpkg)
+;;                   (if-let ((e (hash-table-ref modules-tbl mname)))
+;;                           (begin ;; update old entry
+;;                             (if (list? e)
+;;                                 (hash-table-set! modules-tbl mname
+;;                                                  (cons mpkg e))
+;;                                 (hash-table-set! modules-tbl mname
+;;                                                  (list mpkg e))))
+;;                           ;; else new entry
+;;                           (begin
+;;                             ;; (format #t "adding ~A\n" mname)
+;;                             (hash-table-set! modules-tbl mname
+;;                                              (list mpkg))))))
+;;               deps-alist)
+;

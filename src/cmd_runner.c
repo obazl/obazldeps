@@ -32,6 +32,7 @@
 int errnum;
 int rc;
 
+/* see also tools_opam/bootstrap/opam_deps.c */
 EXPORT void run_codept(char *codept_args_file, char *codept_deps_file)
 {
     log_debug("running codept");
@@ -194,7 +195,7 @@ EXPORT char * run_cmd(char *executable, char **argv)
     /* https://github.com/pixley/InvestigativeProgramming/blob/114b698339fb0243f50cf5bfbe5d5a701733a125/test_spawn_pipe.cpp */
 
     // Read from pipes
-    char buffer[1024] = "";
+    static char buffer[1024] = "";
     struct timespec timeout = {5, 0};
 
     fd_set read_set;

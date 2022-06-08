@@ -5,6 +5,53 @@
 
 (load "srfi.scm")
 
+
+;; derived from srfi-152
+(define (%string-copy! to tstart from fstart fend)
+  (if (> fstart tstart)
+      (do ((i fstart (+ i 1))
+	   (j tstart (+ j 1)))
+	  ((>= i fend))
+	(string-set! to j (string-ref from i)))
+
+      (do ((i (- fend 1)                    (- i 1))
+	   (j (+ -1 tstart (- fend fstart)) (- j 1)))
+	  ((< i fstart))
+	(string-set! to j (string-ref from i)))))
+
+(define (string-concatenate strings)
+  (let* ((total (do ((strings strings (cdr strings))
+		     (i 0 (+ i (string-length (car strings)))))
+		    ((not (pair? strings)) i)))
+	 (ans (make-string total)))
+    (let lp ((i 0) (strings strings))
+      (if (pair? strings)
+	  (let* ((s (car strings))
+		 (slen (string-length s)))
+	    (%string-copy! ans i s 0 slen)
+	    (lp (+ i slen) (cdr strings)))))
+    ans))
+
+(define* (string-join strings (delim " "))
+  (let ((buildit (lambda (lis final)
+		     (let recur ((lis lis))
+		       (if (pair? lis)
+			   (cons delim (cons (car lis) (recur (cdr lis))))
+			   final)))))
+
+    (cond ((pair? strings)
+
+           ;; infix
+	   (string-concatenate
+	    (cons (car strings) (buildit (cdr strings) '()))))
+
+	  ((not (null? strings))
+	   (error "STRINGS parameter not list." strings string-join))
+
+	  ;; STRINGS is ()
+
+	  (else ""))))
+
 (define (string-parse-start+end proc s args)
   (if (not (string? s)) (error "Non-string value" proc s))
   (let ((slen (string-length s)))
@@ -110,13 +157,16 @@
 
 
 ;; srfi 152
-(define (string-index str criterion) ;; . maybe-start+end)
-  ;; (let-string-start+end (start end) string-index str maybe-start+end
-  (let ((start 0) (end (length str)))
-    (let lp ((i start))
-      (and (< i end)
-           (if (criterion (string-ref str i)) i
-               (lp (+ i 1)))))))
+(define string-index
+  (let ((+documentation+
+         "(string-index str pred) returns location of first char in str satisfying pred. Ex: (string-index \"abc\" (lambda (ch) (equal? ch #\b)))"))
+    (lambda (str criterion) ;; . maybe-start+end)
+      ;; (let-string-start+end (start end) string-index str maybe-start+end
+      (let ((start 0) (end (length str)))
+        (let lp ((i start))
+          (and (< i end)
+               (if (criterion (string-ref str i)) i
+                   (lp (+ i 1)))))))))
 
 (define (string-index-right str criterion) ;; . maybe-start+end)
   ;; (let-string-start+end (start end) string-index-right str maybe-start+end
@@ -148,14 +198,16 @@
 ;; 				   s2 start2 end2)
 ;; 	    len1))))
 
-(define (string-prefix? s1 s2)
-  (let* ((len1 (length s1))
-        (len2 (length s2))
-        (delta (- len2 len1)))
-    (and (<= len1 len2)	; Quick check
-	 (= (%string-prefix-length s1 0 len1
-				   s2 0 len2)
-	    len1))))
+(define string-prefix?
+  (let ((+documentation+ "(string-prefix? pfx s2)"))
+    (lambda (s1 s2)
+      (let* ((len1 (length s1))
+             (len2 (length s2))
+             (delta (- len2 len1)))
+        (and (<= len1 len2)	; Quick check
+	     (= (%string-prefix-length s1 0 len1
+				       s2 0 len2)
+	        len1))))))
 
 (define (string-suffix? s1 s2)
   (let* ((len1 (length s1))
@@ -228,4 +280,62 @@
 (define* (string-capitalize str-1 (start 0) end)
   (let ((str (cl-string str-1)))
     (nstring-capitalize (copy str) start end)))
+
+;; s7test.scm
+(define* (subseq sequence start end)
+  (let* ((len (length sequence))
+	 (nd (or (and (number? end) end) len))
+	 (size (- nd start))
+	 (obj (make sequence size)))
+    (do ((i start (+ i 1))
+	 (j 0 (+ j 1)))
+	((= i nd) obj)
+      (set! (obj j) (sequence i)))))
+
+(define (string-left-trim bag str-1)
+  (let ((str (cl-string str-1)))
+    (if (string? bag) (set! bag (string->list bag)))
+    (let ((len (length str)))
+      (do ((i 0 (+ i 1)))
+	  ((or (= i len)
+	       (not (member (str i) bag)))
+	   (if (= i 0)
+	       str
+	       (subseq str i)))))))
+
+(define (string-right-trim bag str-1)
+  (let ((str (cl-string str-1)))
+    (if (string? bag) (set! bag (string->list bag)))
+    (let ((len (length str)))
+      (do ((i (- len 1) (- i 1)))
+	  ((or (< i 0)
+	       (not (member (str i) bag)))
+	   (if (= i (- len 1))
+	       str
+	       (subseq str 0 (+ i 1))))))))
+
+(define (string-trim bag str)
+  (string-right-trim bag (string-left-trim bag str)))
+
+
+;; srfi-152
+;; the segment of characters in string1 from start1 to end1 is
+;; replaced by the segment of characters in string2 from start2 to
+;; end2
+(define (string-replace s1 s2 start1 end1 . maybe-start+end)
+  ;; (check-substring-spec string-replace s1 start1 end1)
+  ;;(let-string-start+end (start2 end2) string-replace s2 maybe-start+end
+    (let* ((slen1 (string-length s1))
+	   (sublen2 (string-length s2)) ;; (- end2 start2))
+	   (alen (+ (- slen1 (- end1 start1)) sublen2))
+	   (ans (make-string alen)))
+      (%string-copy! ans 0 s1 0 start1)
+      (%string-copy! ans start1 s2 0 sublen2) ;; start2 end2)
+      (%string-copy! ans (+ start1 sublen2) s1 end1 slen1)
+      ans))
+;;)
+
+(define (string-tr s char-from char-to)
+  (let ((segs (string-split s char-from)))
+    (string-join segs (string char-to))))
 

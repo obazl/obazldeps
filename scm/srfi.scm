@@ -126,28 +126,30 @@
 	    (values '() '()))))))
 
 ;; FIXME: only works for one list
-(define (any pred lis1 . lists)
-  (check-arg procedure? pred any)
-  (if (pair? lists)
+(define any
+  (let ((+documentation+ "(any pred lst1 . lists)"))
+    (lambda (pred lis1 . lists)
+      (check-arg procedure? pred any)
+      (if (pair? lists)
 
-      ;; N-ary case
-      (let-values (((heads tails) (values (%cars+cdrs (cons lis1 lists)))))
-      ;; (receive (heads tails) (%cars+cdrs (cons lis1 lists))
-        (display (format #f "hd ~A tl ~A" heads tails)) (newline)
-	(and (pair? heads)
-	     (let lp ((heads heads) (tails tails))
-	       ;; (receive (next-heads next-tails) (%cars+cdrs tails)
-	       (let-values (((next-heads next-tails) (values (%cars+cdrs tails))))
-		 (if (pair? next-heads)
-		     (or (apply pred heads) (lp next-heads next-tails))
-		     (apply pred heads)))))) ; Last PRED app is tail call.
+          ;; N-ary case
+          (let-values (((heads tails) (values (%cars+cdrs (cons lis1 lists)))))
+            ;; (receive (heads tails) (%cars+cdrs (cons lis1 lists))
+            (display (format #f "hd ~A tl ~A" heads tails)) (newline)
+	    (and (pair? heads)
+	         (let lp ((heads heads) (tails tails))
+	           ;; (receive (next-heads next-tails) (%cars+cdrs tails)
+	           (let-values (((next-heads next-tails) (values (%cars+cdrs tails))))
+		     (if (pair? next-heads)
+		         (or (apply pred heads) (lp next-heads next-tails))
+		         (apply pred heads)))))) ; Last PRED app is tail call.
 
-      ;; Fast path
-      (and (not (null-list? lis1))
-	   (let lp ((head (car lis1)) (tail (cdr lis1)))
-	     (if (null-list? tail)
-		 (pred head)		; Last PRED app is tail call.
-		 (or (pred head) (lp (car tail) (cdr tail))))))))
+          ;; Fast path
+          (and (not (null-list? lis1))
+	       (let lp ((head (car lis1)) (tail (cdr lis1)))
+	         (if (null-list? tail)
+		     (pred head)		; Last PRED app is tail call.
+		     (or (pred head) (lp (car tail) (cdr tail))))))))))
 
 (define (every pred lis1 . lists)
   (check-arg procedure? pred every)

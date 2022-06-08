@@ -29,6 +29,7 @@ def cc_fetch_repos():
         name = "logc",
         url  = "https://github.com/rxi/log.c/archive/refs/heads/master.zip",
         strip_prefix = "log.c-master",
+        sha256 = "4839147fb0674bcfb4b3ede3d1db055546d12315d2f7592862293dfd1c065f83",
         build_file_content = """
 cc_library(
     name  = 'logc',
@@ -165,6 +166,7 @@ filegroup(name = "hdrs", srcs = ["ini.h"], visibility = ["//visibility:public"])
     #     # strip_prefix =
     # )
 
+    # Unit testing framework for C
     # http://www.throwtheswitch.org/unity
     maybe(
         http_archive,

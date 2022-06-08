@@ -1,5 +1,40 @@
 (load "dune_actions.scm")
 
+(define (rule->ocaml-outfile-names stanza)
+  ;; (format #t "rule->ocaml-outfile-names: ~A\n" stanza)
+  (let ((result
+         (let* ((rule-alist (cdr stanza))
+                (targets (if-let ((targets (assoc 'targets rule-alist)))
+                                 (cadr targets) #f)))
+           ;; (format #t "targets: ~A\n" targets)
+           (if targets
+               (let ((target (if (symbol? targets)
+                                 (symbol->string targets)
+                                 targets)))
+                 ;; (format #t "targets ml?: ~A\n" targets)
+
+                 (if (or (string-suffix? ".mli" target)
+                         (string-suffix? ".ml" target))
+                     target
+                     '()))
+               '()))))
+    ;; (format #t "ocaml outfiles: ~A\n" result)
+    (if (list? result)
+        result
+        (list result))))
+
+(define (normalize-copy-rule pkg-path action stanza srcfiles)
+  (format #t "NORMALIZE-COPY-RULE: ~A: ~A\n" pkg-path action)
+  ;; (format #t "  STANZA: ~A\n" stanza)
+
+  (let* ((src (cadr action))
+         (dst (caddr action)))
+
+    `(:copy
+      (:src ,src)
+      (:dst ,dst))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; https://dune.readthedocs.io/en/stable/dune-files.html#rule
 ;; (rule
 ;;  (target[s] <filenames>)
@@ -84,55 +119,74 @@
 ;; (rule (target[s] <filenames>) (action  <action>) <optional-fields>)
 ;; q: can a rule stanza have multiple actions?
 (define (normalize-stanza-rule pkg-path srcfiles stanza)
-  ;; (format #t "\nNORMALIZE-STANZA-RULE: ~A\n" pkg-path)
+  (format #t "\nNORMALIZE-STANZA-RULE: ~A\n" pkg-path)
+  (format #t "rule stanza: ~A\n" stanza)
+  (format #t "rule srcfiles: ~A\n" srcfiles)
 
   ;; for other stanza types we can normalize fields in isolation. For
   ;; 'rule' stanzas, we need a higher level of analysis, so we cannot
   ;; 'map' over the fields. Instead we extract the fields into local
   ;; vars.
 
-  (let* ((rule-alist (cdr stanza)))
+  (let ((rule-alist (cdr stanza)))
+    (format #t "rule-alist: ~A\n" rule-alist)
+            ;; (action (assoc 'action rule-alist))
+            ;; (alias (assoc 'alias rule-alist))
+            ;; (deps (assoc 'deps rule-alist))
+            ;; (enabled_if (assoc 'enabled_if rule-alist))
+            ;; (fallback (assoc 'fallback rule-alist))
+            ;; (locks (assoc 'locks rule-alist))
+            ;; (mode (assoc 'mode rule-alist))
+            ;; (package (assoc 'package rule-alist))
+            ;; (target (assoc 'target rule-alist))
+            ;; (targets (assoc 'targets rule-alist)))
 
-         ;; (action (assoc 'action rule-alist))
-         ;; (alias (assoc 'alias rule-alist))
-         ;; (deps (assoc 'deps rule-alist))
-         ;; (enabled_if (assoc 'enabled_if rule-alist))
-         ;; (fallback (assoc 'fallback rule-alist))
-         ;; (locks (assoc 'locks rule-alist))
-         ;; (mode (assoc 'mode rule-alist))
-         ;; (package (assoc 'package rule-alist))
-         ;; (target (assoc 'target rule-alist))
-         ;; (targets (assoc 'targets rule-alist)))
+            ;; (naction (if action
+            ;;              (normalize-action action target targets deps))))
 
-         ;; (naction (if action
-         ;;              (normalize-action action target targets deps))))
+            ;; (format #t "rule alist: ~A\n" rule-alist)
+            ;; (format #t "  action: ~A\n" action)
 
-    ;; (format #t "rule alist: ~A\n" rule-alist)
-    ;; (format #t "  action: ~A\n" action)
+            ;; (format #t "  naction: ~A\n" naction)
 
-    ;; (format #t "  naction: ~A\n" naction)
+            ;; (format #t "  alias: ~A\n" alias)
+            ;; (format #t "  deps: ~A\n" deps)
+            ;; (format #t "  enabled_if: ~A\n" enabled_if)
+            ;; (format #t "  fallback: ~A\n" fallback)
+            ;; (format #t "  locks: ~A\n" locks)
+            ;; (format #t "  mode: ~A\n" mode)
+            ;; (format #t "  package: ~A\n" package)
+            ;; (format #t "  target: ~A\n" target)
+            ;; (format #t "  targets: ~A\n" targets)
+            ;; (if targets
+            ;;     (if (> (length targets) 2)
+            ;;         (format #t "   MULTI-TARGETS\n")))
 
-    ;; (format #t "  alias: ~A\n" alias)
-    ;; (format #t "  deps: ~A\n" deps)
-    ;; (format #t "  enabled_if: ~A\n" enabled_if)
-    ;; (format #t "  fallback: ~A\n" fallback)
-    ;; (format #t "  locks: ~A\n" locks)
-    ;; (format #t "  mode: ~A\n" mode)
-    ;; (format #t "  package: ~A\n" package)
-    ;; (format #t "  target: ~A\n" target)
-    ;; (format #t "  targets: ~A\n" targets)
-    ;; (if targets
-    ;;     (if (> (length targets) 2)
-    ;;         (format #t "   MULTI-TARGETS\n")))
+            ;; if we have a target, then we must have an action that generates it.
+            ;; the action will have ${targets}?
 
-    ;; if we have a target, then we must have an action that generates it.
-    ;; the action will have ${targets}?
+            ;; (error 'debug "debugging")
 
-    ;; (error 'debug "debugging")
+    ;; example: (rule (alias buildtest) (deps test_clic.exe) (action (progn)))
 
-    (if-let ((action (assoc 'action rule-alist)))
-        (normalize-action action stanza) ;; action target targets deps)
-        stanza)))
+    (cond
+     ((assoc 'action rule-alist)
+      (begin
+        (normalize-action
+         pkg-path (assoc 'action rule-alist) stanza srcfiles)))
+
+     ((assoc 'copy rule-alist)
+      (begin
+        (normalize-copy-rule
+         pkg-path (assoc 'copy rule-alist) stanza srcfiles)))
+
+     ((assoc 'copy_files# rule-alist)
+      (begin
+        (normalize-copy-rule
+         pkg-path (assoc 'copy_files# rule-alist) stanza srcfiles)))
+
+     (else
+      (format #t "UNHANDLED RULE: ~A\n" rule-alist)))))
 
     ;; (let ((result (map (lambda (fld-assoc)
     ;;                      ;; (display (format #f "fld: ~A" fld-assoc)) (newline)

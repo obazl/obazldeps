@@ -1,7 +1,8 @@
+(load "opam.scm")
 (load "string.scm")
 (load "srfi.scm")
 (load "utils.scm")
-(require write.scm)
+(require pp.scm)
 
 ;;fld: (name tezos_sapling)
 ;; FIXME: remove
@@ -80,6 +81,9 @@
 (define (normalize-stanza-fld-libraries fld)
   ;; (format #t "normalize-stanza-fld-libraries: ~A\n" fld)
   (let-values (((directs selects modules) (analyze-libdeps fld)))
+    ;; (for-each (lambda (module)
+    ;;             (update-opam-table module))
+    ;;           directs)
     (list :deps
           (list (list :raw fld)
                 (list :contingent (reverse selects))
@@ -98,66 +102,75 @@
 ;;   fld)
 
 ;; e.g. (cdr (:standard (symbol "\\") legacy_store_builder))
-(define (srcs->module-names srcfiles seq)
+(define (srcs->module-names srcfiles) ;; seq)
   ;; (format #t "srcs->module-names: ~A => ~A\n" srcfiles seq)
-  (if (null? srcfiles)
-      seq
-      (let ((m (file-name->module-name (car srcfiles))))
-        (if (member m seq)
-            (srcs->module-names (cdr srcfiles) seq)
-            (srcs->module-names (cdr srcfiles)
-                                (cons m seq))))))
+  (let recur ((srcfiles srcfiles)
+              (modnames '()))
+    (if (null? srcfiles)
+        modnames
+        (let ((m (file-name->module-name (car srcfiles))))
+          (if (member m modnames) ;; avoid .ml/.mli dups
+              (recur (cdr srcfiles) modnames)
+              (recur (cdr srcfiles) (cons m modnames)))))))
 
-(define (normalize-stanza-lib-fld-modules srcfiles modules-assoc)
-  ;; (format #t "normalize-stanza-lib-fld-modules: ~A\n" modules-assoc)
-  ;; modules-assoc:: (modules <list of lists>)
+;;;;; expand dune constant ':standard' for modules
+;; e.g.
+;; src/proto_alpha/lib_parmeters: (modules :standard \ gen)
+;; lib_client_base:: (modules (:standard bip39_english))
+(define (standard-modules modules srcfiles)
+  ;; modules arg: everything after :standard
+  ;; (format #t "standard-modules: ~A\n" modules)
+  ;; WARNING: the '\' is a symbol, but it does not print as '\,
+  ;; rather it prints as (symbol "\\"); use same to compare, do
+  ;; not compare car to 'symbol, like so:
 
-  ;; modules list: each module is in a list (from codept sexp) whose
-  ;; car may be a namespace module.
-  (let* ((modules (cdr modules-assoc)))
+  ;; (if (not (null? modules))
+  ;;     (if (equal? (car modules) (symbol "\\"))
+  ;;         (format #t "EXCEPTING ~A\n" (cdr modules))))
+
+  ;; (format #t "  srcfiles: ~A\n" srcfiles)
+  (let ((module-names (srcs->module-names srcfiles)))
     (if (null? modules)
-        (values '() '())
-        ;; (let ((result
-               (let recur ((modules modules)
-                           (direct '())
-                           (indirect '()))
-                 ;; (format #t "ms: ~A; direct: ~A\n" modules direct)
-                 (cond
-                  ((null? modules)
-                   (values direct indirect))
+        ;; (modules (:standard)) means same as omitting (modules), i.e.
+        ;; all modules
+        (values module-names '())
 
-                  ((equal? :standard (car modules))
-                   (let ((newseq (srcs->module-names srcfiles direct)))
-                     ;; (format #t "modules :STANDARD ~A\n" newseq)
-                     ;; (format #t "CDRMODS ~A\n" (cdr modules))
-                     (recur (cdr modules) (append newseq direct) indirect)))
-                  ;; (concatenate direct
-                  ;;              (norm-std-modules (cdr modules))))
-                  ((pair? (car modules))
-                   (let-values (((exp gen)
-                                (recur (car modules) '() '())))
-                     (recur (cdr modules)
-                            (concatenate exp direct)
-                            (concatenate gen indirect))))
-
-                  ((indirect-module-dep? (car modules) srcfiles)
-                   (begin
-                     ;; (format #t "INDIRECT: ~A\n" (car modules))
-                     (recur (cdr modules)
-                            direct (cons (car modules) indirect))))
-
-                  (else
-                   (recur (cdr modules)
-                          (cons (car modules) direct)
-                          indirect))))
-          ;;      ))
-          ;; ;;(format #t "RESULT: ~A\n" result)
-          ;; (reverse result))
-               )))
-     ;;      (norm-std-modules modules)
-     ;;      (car modules)))
-     ;;  (cons :modules (list (car modules)))
-     ;; (else (cons :modules modules)))))
+        ;; NB: (:standard \ ...) => (:standard (symbol "\\") ...)
+        (if (pair? (car modules))
+            (if (equal? (caar modules) (symbol "\\"))
+                (let ((exception (cadr modules)))
+                  ;; (format #t "EXCEPTION1: ~A\n" exception)
+                  (values (remove-if list
+                                     (lambda (m)
+                                       ;; (format #t "remove? ~A\n" m)
+                                       (equal? exception m))
+                                     module-names)
+                          '()))
+                ;; else :standard adds to default list, e.g.
+                ;; (:standard (foo bar baz))
+                ;; tezos example: src/lib_client_base:
+                ;;     (modules (:standard bip39_english))
+                (values (concatenate (map
+                                      normalize-module-name
+                                      (car modules))
+                                     module-names)
+                        '()))
+            ;; else (car modules) is atom,
+            ;; e.g. (:standard \ foo) or (:standard foo bar baz) ...
+            (if (equal? (car modules) (symbol "\\"))
+                (let ((exception (normalize-module-name (cadr modules))))
+                  ;; (format #t "EXCEPTION2: ~A\n" exception)
+                  (values (remove-if list
+                                     (lambda (m)
+                                       ;; (format #t "remove? ~A\n" m)
+                                       (equal? exception m))
+                                     module-names)
+                          '()))
+                (values (concatenate (map
+                                      normalize-module-name
+                                      modules)
+                                     module-names)
+                        '()))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; fields:  foreign_stubs (src files); foreign_archives (precompiled imports)
@@ -217,52 +230,62 @@
 
 (define (split-opens flags)
   ;; (format #t "split-opens: ~A\n" flags)
+  ;; WARNING: preserve order of '-open' args!
   (let recur ((flags flags)
               (opens '())
               (opts  '())
               (std  #f))
     (if (null? flags)
-        (values opens opts std)
-        (if (list? (car flags))
-            (let-values (((-opens -opts -std) (split-opens (car flags))))
-              (recur (cdr flags)
-                     (concatenate -opens opens)
-                     (concatenate -opts opts)
-                     -std))
-            (if (symbol? (car flags))
-                (cond
-                 ((equal? (car flags) '-open)
+        (values
+         (reverse opens)
+         opts std)
+        (cond
+         ((list? (car flags))
+          (let-values (((-opens -opts -std) (split-opens (car flags))))
+            (recur (cdr flags)
+                   (concatenate -opens opens)
+                   (concatenate -opts opts)
+                   -std)))
+         ((symbol? (car flags))
+          (cond
+           ((equal? (car flags) '-open)
+            (recur (cddr flags)
+                   (cons (normalize-open (cadr flags)) opens)
+                   opts std))
+           ((equal? (car flags) ':standard)
+            (recur (cdr flags) opens opts #t))
+           (else
+            (recur (cdr flags) opens (cons (car flags) opts) std))))
+         ((number? (car flags))
+          ;; e.g. (flags (:standard -w -9 -nolabels))
+          (recur (cdr flags) opens (cons (car flags) opts) std))
+         (else
+          ;; not symbol
+          (if (string? (car flags))
+              (if (string=? (car flags) "-open")
                   (recur (cddr flags)
                          (cons (normalize-open (cadr flags)) opens)
-                         opts std))
-                 ((equal? (car flags) ':standard)
-                  (recur (cdr flags) opens opts #t))
-                 (else
-                  (recur (cdr flags) opens (cons (car flags) opts) std)))
-                ;; not symbol
-                (if (string? (car flags))
-                    (if (string=? (car flags) "-open")
-                        (recur (cddr flags)
-                               (cons (normalize-open (cadr flags)) opens)
-                               std)
-                        (recur (cdr flags) opens (cons (car flags) opts)
-                               std))
-                    ;; not symbol, not string
-                    (error 'bad-arg
-                           (format #f "ERROR: unexpected flag type ~A"
-                                   flags))))))))
+                         std)
+                  (recur (cdr flags) opens (cons (car flags) opts)
+                         std))
+              ;; not symbol, not string
+              (error 'bad-arg
+                     (format #f "ERROR: unexpected flag type ~A"
+                             flags))))))))
 
 ;; (flags :standard)
 ;; (flags (:standard -open Tezos_base__TzPervasives -open Tezos_micheline))
 ;; (:standard -linkall)
 (define (normalize-stanza-fld-flags flags)
-  ;; (format #t "normalize-stanza-fld-flags: ~A\n" flags)
+  (format #t "normalize-stanza-fld-flags: ~A\n" flags)
   (if flags
       ;; (let* ((flags (if (list? (cadr flags))
       ;;                   (cadr flags)
       ;;                   (list (cdr flags))))
       (let* ((flags (cdr flags))
              ;; FIXME: expand :standard
+             ;; e.g. src/lib_store/legacy_store:
+             ;;     (modules (:standard \ legacy_store_builder))
              (std (any (lambda (flag) (equal? flag :standard)) flags))
              (clean-flags (if std (remove :item :standard flags) flags)))
         ;; (format #t "DIRTY: ~A\n" flags)
@@ -274,9 +297,9 @@
           ;; (format #t "STD: ~A\n" std)
           (list :opts
                 (concatenate
-                 (if std '((:standard)) '())
-                 (if (null? opens) '() `((:opens ,(reverse opens))))
-                 `((:raw ,flags))
+                 (if std '((:standard)) '()) ;; FIXME: expand :standard flags
+                 (if (null? opens) '() `((:opens ,opens)))
+                 `((:raw (,flags)))
                  `((:flags ,(reverse opts)))))))
       #f))
 
@@ -295,7 +318,7 @@
           ;; (format #t "  std:  ~A"  std)
           (list :lib-flags
                 (concatenate
-                 (if std '((:standard)) '())
+                 (if std '((:standard)) '()) ;;FIXME: expand :standard flags
                  (if (null? opens) '() `((:opens ,opens)))
                  `((:raw ,lib-flags))
                  `((:flags ,@(if std

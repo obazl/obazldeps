@@ -1,5 +1,7 @@
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <glob.h>
 #include <libgen.h>
 #ifdef LINUX                    /* FIXME */
 #include <linux/limits.h>
@@ -7,6 +9,7 @@
 #include <limits.h>             /* PATH_MAX */
 #endif
 #include <pwd.h>
+#include <spawn.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,8 +21,8 @@
 
 #include "ini.h"
 #include "log.h"
-#include "s7.h"
 #if EXPORT_INTERFACE
+#include "s7.h"
 #include "utarray.h"
 #include "utstring.h"
 #endif
@@ -29,15 +32,11 @@
 bool debug;
 bool verbose;
 
-s7_scheme *s7;                  /* GLOBAL s7 */
-s7_pointer old_port;
-/* LOCAL s7_pointer result; */
-int gc_loc = -1;
 const char *errmsg = NULL;
 
 int rc;
 
-char *callback_script_file = "camlark.scm"; // passed in 'data' attrib
+char *callback_script_file = "dune.scm"; // passed in 'data' attrib
 char *callback = "camlark_handler"; /* fn in callback_script_file  */
 
 /* load-path script directories: sys, user, proj, in order
@@ -45,8 +44,8 @@ char *callback = "camlark_handler"; /* fn in callback_script_file  */
        run under `bazel run`: dir in runfiles containing callback script
            @camlark//scm/s7, @camlark//scm
        run directly: XDG_DATA_DIRS default: /usr/local/share
-           XDG_DATA_DIRS/s7
-           XDG_DATA_DIRS/obazl/scm
+           XDG_DATA_DIRS/obazl/libs7
+           XDG_DATA_DIRS/obazl/libs7/s7
    user scripts:
        ($HOME)/.obazl.d/scm
        $XDG_DATA_HOME default: $HOME/.local/share
@@ -212,7 +211,7 @@ EXPORT void obazl_configure(char *_exec_root)
     utstring_new(exec_root);
     utstring_printf(exec_root, "%s", _exec_root);
     if (debug)
-        log_debug("EXEC_ROOT: %s", utstring_body(exec_root));
+        log_debug("EXEC ROOT (launch dir): %s", utstring_body(exec_root));
 
     utstring_new(runfiles_root);
     utstring_printf(runfiles_root, "%s", getcwd(NULL, 0));
@@ -272,9 +271,12 @@ EXPORT void obazl_configure(char *_exec_root)
 
     utarray_new(src_files,&ut_str_icd);
 
-    _s7_init();
+    s7_initialize();
+    /* init_glob(s7); */
 
     chdir(_proj_root);
+    if (debug)
+        log_debug("CWD: %s\n", getcwd(NULL, 0));
 }
 
 void config_opam(char *_opam_switch)
@@ -348,61 +350,6 @@ void config_opam(char *_opam_switch)
 /*     return opam_dirs; */
 /* } */
 
-s7_pointer s7_error_handler(s7_scheme *sc, s7_pointer args)
-{
-    log_error("error: %s\n", s7_string(s7_car(args)));
-    fprintf(stdout, "error: %s\n", s7_string(s7_car(args)));
-    return(s7_f(sc));
-}
-
-LOCAL s7_pointer _dirname(s7_scheme *s7, s7_pointer args)
-{
-    /* log_debug("_dirname %s", s7_object_to_c_string(s7, args)); */
-    if ( !s7_is_null(s7, args) ) {
-        char *d = dirname(s7_object_to_c_string(s7, s7_car(args)));
-        return s7_make_string(s7, d);
-    } else
-        return s7_nil(s7);
-}
-
-LOCAL s7_pointer _basename(s7_scheme *s7, s7_pointer args)
-{
-    /* log_debug("_basename %s", s7_object_to_c_string(s7, args)); */
-    if ( !s7_is_null(s7, args) ) {
-        char *bn = basename(s7_object_to_c_string(s7, s7_car(args)));
-       /* s7_make_string copies bn into scheme? */
-        return s7_make_string(s7, bn);
-    } else
-        return s7_nil(s7);
-}
-
-LOCAL void _s7_init(void)
-{
-    s7 = s7_init();
-
-    /* trap error messages */
-    /* old_port = s7_set_current_error_port(s7, s7_open_output_string(s7)); */
-    /* if (old_port != s7_nil(s7)) */
-    /*     gc_loc = s7_gc_protect(s7, old_port); */
-
-    s7_define_function(s7, "error-handler",
-                       s7_error_handler, 1, 0, false,
-                       "our error handler");
-
-    s7_define_safe_function(s7, "dirname", _dirname,
-                            1, 0, false,
-                            "dirname: return directory part of file path");
-    s7_define_safe_function(s7, "basename", _basename,
-                            1, 0, false,
-                            "basename: return basename part of file path");
-
-    set_load_path(callback_script_file);
-
-    s7_pointer lf;
-    /* log_info("loading default script: %s", callback_script_file); */
-    lf =  s7_load(s7, callback_script_file);
-}
-
 /*
   sets bazel_script_dir to dir containing scriptfile, which must be
   passed in 'data' attrib of cc_binary rule
@@ -432,11 +379,18 @@ LOCAL void _config_bazel_load_path(char *scriptfile, UT_string *manifest)
         }
     }
 
-    utstring_new(codept_args_file);
-    utstring_printf(codept_args_file, "%s/%s", utstring_body(obazl_d), codept_args_filename);
+    /* utstring_new(codept_args_file); */
+    /* utstring_printf(codept_args_file, "%s/%s", utstring_body(obazl_d), codept_args_filename); */
 
-    utstring_new(codept_deps_file);
-    utstring_printf(codept_deps_file, "%s/%s", utstring_body(obazl_d), codept_deps_filename);
+    /* utstring_new(codept_deps_file); */
+    /* utstring_printf(codept_deps_file, "%s/%s", utstring_body(obazl_d), codept_deps_filename); */
+
+    /*
+      build scripts list their scm srcs in the 'data' attrib, which
+      puts them in the runfiles area. they are listed in MANIFEST, so
+      we need to parse it to find out which dirs we need to add to the
+      s7 load path.
+     */
 
     /* bazel (sys) script dir */
     fp = fopen(utstring_body(manifest), "r");
@@ -445,38 +399,96 @@ LOCAL void _config_bazel_load_path(char *scriptfile, UT_string *manifest)
         /* exit(EXIT_FAILURE); */
     }
 
+    if (debug)
+        log_debug("Reading MANIFEST");
+
+    char *dune_ed_scm = NULL;
+
+    s7_pointer load_dirs = s7_make_hash_table(s7, 5);
+    s7_pointer sdir;
+
+    /*
+      WARNING: we have to jump thru some hoops to get the order right:
+      "." > dune_ed/scm > libs7/scm > libs7/scm/s7
+
+      We we need to get these paths from the MANIFEST since it has
+      absolute paths, and we could be running from any dir (when used
+      as a tool lib).
+
+      We build the path list by following the MANIFEST order for
+      libs7, but not dune_ed since the MANIFEST seems to put that
+      last. So we save the latter when we find it, then when done with
+      the MANIFEST we put the dune_ed/scm on top of the stack. Finally
+      we append our list to *load-path*, which puts "." on top.
+    */
+
+    s7_pointer tmp_load_path = s7_list(s7, 0);
+
+    char *key;
     while ((read = getline(&line, &len, fp)) != -1) {
-        /* log_debug("Retrieved line of length %zu:", read); */
-        /* log_debug("\n%s", line); */
-        bool hit = false;
-        /* two tokens per line */
-        while ((bazel_script_dir = strsep(&line, " ")) != NULL) {
-            if (hit) {
-                bazel_script_dir = dirname(bazel_script_dir);
-                /* log_debug("bazel script dir: %s", bazel_script_dir); */
-                UT_string *s7_script_dir = NULL;
-                utstring_new(s7_script_dir);
-                utstring_printf(s7_script_dir, "%s/s7", bazel_script_dir);
-                if (verbose)
-                    log_debug("adding to *load-path*: %s",
-                              utstring_body(s7_script_dir));
-                s7_add_to_load_path(s7, utstring_body(s7_script_dir));
-                utstring_free(s7_script_dir);
-                if (verbose)
-                    log_debug("adding to *load-path*: %s", bazel_script_dir);
-                s7_add_to_load_path(s7, bazel_script_dir);
-                fclose(fp);
-                return;
-            } else {
-                char *dot = strrchr(bazel_script_dir, '/');
-                if (dot && !strcmp(dot+1, scriptfile))
-                    hit = true;
+        log_debug("Retrieved line of length %zu:", read);
+        log_debug("%s", line);
+
+        line[strcspn(line, "\n")] = '\0';    /* trim trailing newline */
+
+        /* two tokens per line, first is path relative to exec dir,
+           second is corresponding absolute path */
+        char *token, *sep = " ";
+        token = strtok((char*)line, sep);
+        if (token != NULL) {
+            token = strtok(NULL, sep);
+        } else {
+            /* log_debug("skipping entry"); */
+            continue;
+        }
+
+        char *ext = strrchr(token, '.');
+        if (ext != NULL) {
+            if ( (strncmp(ext, ".scm", 4) == 0) && strlen(ext) == 4) {
+                char *scriptdir = dirname(token);
+                /* log_info("SCRIPTDIR: %s", scriptdir); */
+
+                char *substr = strstr(scriptdir, "dune_ed/scm");
+                if (substr != NULL) {
+                    /* log_debug("FOUND dune_ed path: %s, %s", */
+                    /*           line, scriptdir); */
+                    if (dune_ed_scm == NULL) {
+                        int len = strlen(scriptdir) + 1;
+                        dune_ed_scm = calloc(len, 1);
+                        strlcpy(dune_ed_scm, scriptdir, len);
+                    }
+                    continue;
+                }
+
+                sdir = s7_make_string(s7, scriptdir);
+                s7_pointer r = s7_hash_table_ref(s7, load_dirs, sdir);
+                if (r == s7_f(s7)) {
+                    // add to hash to ensure uniqueness
+                    /* log_debug("adding to hash"); */
+                    s7_hash_table_set(s7, load_dirs,
+                                      sdir, s7_t(s7));
+
+                    tmp_load_path = s7_append(s7, tmp_load_path,
+                                    s7_list(s7, 1,
+                                            s7_make_string(s7, scriptdir)));
+                }
             }
         }
     }
     fclose(fp);
-    log_error("script %s not found; did you add it to the 'data' attribute of the build rule?", scriptfile);
-    exit(EXIT_FAILURE);
+
+    /* put dune_ed/scm on top of tmp stack */
+    tmp_load_path = s7_cons(s7,
+                            s7_make_string(s7, dune_ed_scm),
+                            tmp_load_path);
+
+    /* now put default "." on top of tmp stack */
+    s7_pointer loadp = s7_load_path(s7);
+    tmp_load_path = s7_append(s7, loadp, tmp_load_path);
+    /* log_debug("lp: %s", s7_object_to_c_string(s7, tmp_load_path)); */
+
+    /* replace *load-path* with our shiny new stack */
+    s7_define_variable(s7, "*load-path*", tmp_load_path);
 }
 
 LOCAL void _config_project_load_path(void)
@@ -490,7 +502,7 @@ LOCAL void _config_project_load_path(void)
     rc = access(utstring_body(proj_script_dir), R_OK);
     if (rc) {
         if (verbose || debug)
-            log_debug("project script dir %s not found",
+            log_warn("project script dir %s not found",
                      utstring_body(proj_script_dir));
     } else {
         if (verbose)
@@ -546,15 +558,34 @@ LOCAL void _config_xdg_load_path(void)
     UT_string *xdg_user_script_dir;
 
     /* system obazl script dirs:
-       $XDG_DATA_DIRS/s7, $XDG_DATA_DIRS/obazl/scm
+       $XDG_DATA_DIRS/obazl/libs7, $XDG_DATA_DIRS/obazl/libs7/s7
     */
     char *xdg_data_dirs = getenv("XDG_DATA_DIRS");
     if (xdg_data_dirs == NULL) {
         xdg_data_dirs = "/usr/local/share";
     }
     utstring_new(xdg_bazel_script_dir);
-    utstring_printf(xdg_bazel_script_dir, "%s/%s",
-                    xdg_data_dirs, "obazl/scm");
+    utstring_printf(xdg_bazel_script_dir,
+                    "%s/obazl/libs7/s7",
+                    xdg_data_dirs);
+    /* log_debug("s7 xdg_bazel_script_dir: %s", */
+    /*           utstring_body(xdg_bazel_script_dir)); */
+
+    rc = access(utstring_body(xdg_bazel_script_dir), R_OK);
+    if (rc) {
+        if (verbose || debug)
+            log_info("Not found: obazl s7 system script dir at: %s",
+                     utstring_body(xdg_bazel_script_dir));
+    } else {
+        if (verbose)
+            log_debug("adding to *load-path*: %s",
+                     utstring_body(xdg_bazel_script_dir));
+        s7_add_to_load_path(s7, utstring_body(xdg_bazel_script_dir));
+    }
+
+    utstring_new(xdg_bazel_script_dir);
+    utstring_printf(xdg_bazel_script_dir, "%s/obazl/libs7",
+                    xdg_data_dirs);
     /* log_debug("xdg_bazel_script_dir: %s", */
     /*           utstring_body(xdg_bazel_script_dir)); */
 
@@ -567,24 +598,6 @@ LOCAL void _config_xdg_load_path(void)
         s7_add_to_load_path(s7, utstring_body(xdg_bazel_script_dir));
     }
 
-    utstring_renew(xdg_bazel_script_dir);
-    utstring_printf(xdg_bazel_script_dir, "%s/%s",
-                    xdg_data_dirs, "s7");
-    /* log_debug("s7 xdg_bazel_script_dir: %s", */
-    /*           utstring_body(xdg_bazel_script_dir)); */
-
-    rc = access(utstring_body(xdg_bazel_script_dir), R_OK);
-    if (rc) {
-        if (verbose || debug)
-            log_info("Not found: obazl s7 sys script dir: %s",
-                     utstring_body(xdg_bazel_script_dir));
-    } else {
-        if (verbose)
-            log_debug("adding to *load-path*: %s",
-                     utstring_body(xdg_bazel_script_dir));
-        s7_add_to_load_path(s7, utstring_body(xdg_bazel_script_dir));
-    }
-
     /* user obazl script dir: $XDG_DATA_HOME/obazl/scm */
     struct passwd *pw = getpwuid(getuid());
     const char *homedir = pw->pw_dir;
@@ -592,34 +605,15 @@ LOCAL void _config_xdg_load_path(void)
 
     utstring_new(xdg_user_script_dir);
     char *xdg_data_home = getenv("XDG_DATA_HOME");
-    /* s7 first */
-    if (xdg_data_home == NULL) {
-        utstring_printf(xdg_user_script_dir, "%s/%s",
-                        homedir, ".local/share/s7");
-    } else {
-        utstring_printf(xdg_user_script_dir, "%s/%s",
-                        xdg_data_home, "s7");
-    }
-    rc = access(utstring_body(xdg_user_script_dir), R_OK);
 
-    if (rc) {
-        if (verbose || debug)
-            log_info("Not found: user xdg s7 script dir: %s.",
-                     utstring_body(xdg_user_script_dir));
-    } else {
-        if (verbose)
-            log_debug("adding to *load-path*: %s",
-                     utstring_body(xdg_user_script_dir));
-        s7_add_to_load_path(s7, utstring_body(xdg_user_script_dir));
-    }
-    /* user obazl/scm */
-    utstring_renew(xdg_user_script_dir);
     if (xdg_data_home == NULL) {
-        utstring_printf(xdg_user_script_dir, "%s/%s",
-                        homedir, ".local/share/obazl/scm");
+        utstring_printf(xdg_user_script_dir,
+                        "%s/.local/share/obazl/libs7/s7",
+                        homedir);
     } else {
-        utstring_printf(xdg_user_script_dir, "%s/%s",
-                        xdg_data_home, "obazl/scm");
+        utstring_printf(xdg_user_script_dir,
+                        "%s/.local/share/obazl/libs7/s7",
+                        xdg_data_home);
     }
     /* log_debug("s7 xdg_user_script_dir: %s", */
     /*           utstring_body(xdg_user_script_dir)); */
@@ -635,14 +629,40 @@ LOCAL void _config_xdg_load_path(void)
                      utstring_body(xdg_user_script_dir));
         s7_add_to_load_path(s7, utstring_body(xdg_user_script_dir));
     }
+
+    utstring_renew(xdg_user_script_dir);
+    if (xdg_data_home == NULL) {
+        utstring_printf(xdg_user_script_dir,
+                        "%s/.local/share/obazl/libs7",
+                        homedir);
+    } else {
+        utstring_printf(xdg_user_script_dir,
+                        "%s/.local/share/obazl/libs7",
+                        xdg_data_home);
+    }
+    rc = access(utstring_body(xdg_user_script_dir), R_OK);
+
+    if (rc) {
+        if (verbose || debug)
+            log_info("Not found: user xdg s7 script dir: %s.",
+                     utstring_body(xdg_user_script_dir));
+    } else {
+        if (verbose)
+            log_debug("adding to *load-path*: %s",
+                     utstring_body(xdg_user_script_dir));
+        s7_add_to_load_path(s7, utstring_body(xdg_user_script_dir));
+    }
 }
 
 EXPORT void set_load_path(char *scriptfile)
 {
     /* log_debug("set_load_path for %s", scriptfile); */
-    char *_wd = getcwd(NULL, 0);
-    if (debug)
-        log_debug("CURRENT WORKING DIRECTORY: %s", _wd);
+    /* char *_wd = getcwd(NULL, 0); */
+
+    if (debug) {
+        s7_pointer lp = s7_load_path(s7);
+        log_debug("*load-path*: %s", s7_object_to_c_string(s7, lp));
+    }
 
     /* FIXME: reliable way to detect if we're run by bazel */
 
@@ -651,16 +671,17 @@ bazel run is similar, but not identical, to directly invoking the binary built b
   */
 
     /* so if we find MANIFEST, we're running a test? */
-    char *mdir = dirname(_wd);
-    /* log_debug("MANIFEST DIR: %s", mdir); */
+    char *mdir = dirname(utstring_body(exec_root)); // _wd);
+    if (debug)
+        log_debug("MANIFEST DIR: %s", mdir);
 
     UT_string *manifest;
     utstring_new(manifest);
     utstring_printf(manifest, "%s%s", mdir, "/MANIFEST");
-    /* log_debug("MANIFEST: %s", utstring_body(manifest)); */
+    if (debug)
+        log_debug("MANIFEST: %s", utstring_body(manifest));
 
     rc = access(utstring_body(manifest), R_OK);
-
     if (rc) {
         if (verbose)
             log_info("Configuring for non-bazel run");
@@ -670,17 +691,23 @@ bazel run is similar, but not identical, to directly invoking the binary built b
         _config_bazel_load_path(scriptfile, manifest);
     }
     _config_project_load_path();
-    if (verbose || debug) {
-        s7_pointer lp = s7_load_path(s7);
-        log_info("load path: %s", s7_object_to_c_string(s7, lp));
-    }
-}
 
-EXPORT void obazl_shutdown(void)
-{
-    s7_close_output_port(s7, s7_current_error_port(s7));
-    s7_set_current_error_port(s7, old_port);
-    if (gc_loc != -1)
-        s7_gc_unprotect_at(s7, gc_loc);
-    s7_quit(s7);
+    // MANIFEST puts dune_ed/scm last, we need to reorder
+    /* s7_load(s7, "utils.scm"); */
+    /* s7_pointer del = s7_name_to_value(s7, "remove-ifx"); */
+    /* s7_pointer pred = s7_eval_c_string(s7, */
+    /*                                    "(lambda (x) (or (equal? x \"/Users/gar/obazl/dune_ed/scm\") (equal? x \".\")))"); */
+
+    /* s7_pointer lp = s7_load_path(s7); */
+    /* s7_pointer new_lp = s7_call(s7, del, */
+    /*                             s7_list(s7, 2, pred, lp)); */
+
+    /* log_debug("new lp: %s", s7_object_to_c_string(s7, new_lp)); */
+
+
+    if (debug) {
+        s7_pointer lp = s7_load_path(s7);
+        log_debug("*load-path*: %s", s7_object_to_c_string(s7, lp));
+    }
+
 }

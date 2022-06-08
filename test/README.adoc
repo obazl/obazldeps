@@ -1,0 +1,233 @@
+= testing
+
+Currently we only have dune->starlark test cases, and we do our
+testing at the repl; automated tests are not yet.
+
+== dune
+
+Dune files contain _stanzas_ which contain _fields_. ...
+
+=== unit testing
+
+Strategy: apply camlark functions to dunefile fragments. Since dune
+uses Scheme syntax, we can embed dunfile fragments in ordinary Scheme
+structures. Then we load a test structure (from a `.scm` file), load
+the camlark Scheme code containing the function to test, extract the
+dune fragment from the test structure, and apply the function to the fragment.
+
+For this to work the camlark standard library (the Scheme code in `camlark/scm` and
+`camlark/scm/s7`) must be in the load-path. By default the camlark
+load-path is configured to include `$HOME/.obazl.d/scm`, so for
+testing purposes we use symlinks:
+
+* `camlark/scm` -> `$HOME/.obazl.d/scm`
+* `camlark/scm/s7` -> `$HOME/.obazl.d/scm/s7`
+* `camlark/test -> `$HOME/.obazl.d/scm/test`
+
+Then we can load camlark code by e.g. `(load "dune_stana_rule.scm")`,
+and test code by e.g. `(load "test/ocaml/rules/progn.scm")`.
+
+In the test Scheme files we use a simple "unit-case" definition  to facilitate testing:
+
+[source,scheme]
+----
+(define <name>
+  '((:pkg-path "...")
+    (:rule (rule ...))))
+;; or:
+    (:stanza (<stanza name> ...))))
+----
+
+Each test file (e.g. `test/ocaml/rules/with-stdout-to.scm` contains a
+set of unit-case definitions. The file must contain a `proj-root`
+definition, which must be a path to the original source code root; and
+each unit-case must contain a `:pkg-path` relative to the `proj-root`.
+
+This is because the parsing functions are designed to be run from the
+root of a project. They don't all use those paths, but some do. For
+example, some of them need to obtain a list of source files in the
+directory containing the dunefile.
+
+The down side of this design is that the projects we're using for
+testing must be on the local file system and the `proj-root` must point to them.
+
+TODO: remove this dependency. Make all test data local.
+
+=== rule stanzas
+
+For example, to test Dune rule stanzas containing the `with-stdout-to` function, we use a
+fragment from the `ocaml/lambda` subdirectory of the compiler sources:
+
+[source,scheme,title="test/ocaml/rules/with-stdout-to.scm"]
+----
+(define proj-root "$HOME/ocaml/ocaml/")
+...
+(define ocaml/lambda
+  '((:pkg-path "lambda")
+   (:rule (rule
+           (targets runtimedef.ml)
+           (mode    fallback)
+           (deps    (:fail (file ../runtime/caml/fail.h))
+                    (:prim (file ../runtime/primitives)))
+           (action  (with-stdout-to %{targets}
+                                    (run ./generate_runtimedef.sh %{fail} %{prim})))))))
+----
+
+Then in our test driver we pick out a structure for testing and bind it to a global var `stanza-pkg`:
+
+----
+(begin
+  (load "test/ocaml/rules/with-stdout-to.scm")
+  (define stanza-pkg ocaml/lambda)
+  )
+----
+
+And then we load the function we need (`normalize-stanza-rule`),
+decompose the `stanza-pkg` structure, and apply the function:
+
+----
+(define nx
+  (let* (; (pkg rule)
+         (pkg-path (cadr (assoc :pkg-path stanza-pkg)))
+         (src-path (string-append proj-root pkg-path))
+         (srcfiles (directory->list src-path))
+         (rule (cadr (assoc :rule stanza-pkg))))
+    (format #t "pkg-path: ~S\n" pkg-path) <1>
+    (format #t "srcfiles: ~A\n" srcfiles)
+    (format #t "rule: ~A\n" rule)
+    (load "dune_stanza_rule.scm")
+    (load "dune_actions.scm")
+    (chdir proj-root)
+    (normalize-stanza-rule pkg-path
+                           srcfiles
+                           rule)))
+----
+<1> `format` is how you print strings to stdout; see link:https://ccrma.stanford.edu/software/snd/snd/s7.html#format1[format]
+
+Then we can inspect the result:
+
+----
+nx
+(cdr nx)
+(assoc :raw (cdr nx))
+(assoc :cmd (cdr nx))
+(assoc-in '(:cmd :tool) (cdr nx))
+(assoc-in '(:cmd :args) (cdr nx))
+(assoc-in '(:cmd :deps) (cdr nx))
+----
+
+=== stanzas
+
+E.g.
+
+[source,scheme,title="toplevel/byte"]
+----
+(define toplevel/byte
+  '((:pkg-path "toplevel")
+    (:stanza
+     (copy_files# byte/*.ml))))
+----
+
+=== tezos
+
+[gar:~/tweag/tezos]$ rg rule -g dune | wc -l
+     155
+
+[gar:~/tweag/tezos]$ rg rule -g dune -l | wc -l
+      52
+
+[gar:~/tweag/tezos]$ rg rule -g dune -l | sort
+docs/doc_gen/dune
+src/bin_client/dune
+src/bin_codec/dune
+src/bin_node/dune
+src/bin_proxy_server/dune
+src/lib_base/test/dune
+src/lib_benchmark/lib_micheline_rewriting/test/dune
+src/lib_benchmark/test/dune
+src/lib_clic/test/dune
+src/lib_client_base/dune
+src/lib_client_base/test/dune
+src/lib_client_base_unix/test/dune
+src/lib_context/test/dune
+src/lib_error_monad/test/dune
+src/lib_micheline/test/dune
+src/lib_mockup/test/dune
+src/lib_p2p/test/dune
+src/lib_protocol_compiler/dune
+src/lib_protocol_compiler/test/dune
+src/lib_protocol_environment/test/dune
+src/lib_proxy/test/dune
+src/lib_proxy_server_config/dune
+src/lib_proxy_server_config/test/dune
+src/lib_requester/test/dune
+src/lib_sapling/bindings/dune
+src/lib_shell/bench/dune
+src/lib_shell/test/dune
+src/lib_signer_backends/test/dune
+src/lib_signer_backends/unix/test/dune
+src/lib_stdlib/test/dune
+src/lib_store/legacy_store/test/dune
+src/lib_store/test/dune
+src/lib_version/dune
+src/proto_000_Ps9mPmXa/lib_client/dune
+src/proto_006_PsCARTHA/lib_parameters/dune
+src/proto_008_PtEdo2Zk/lib_client/test/dune
+src/proto_008_PtEdo2Zk/lib_parameters/dune
+src/proto_008_PtEdo2Zk/lib_protocol/test/dune
+src/proto_009_PsFLoren/lib_client/test/dune
+src/proto_009_PsFLoren/lib_parameters/dune
+src/proto_009_PsFLoren/lib_protocol/test/dune
+src/proto_010_PtGRANAD/lib_client/test/dune
+src/proto_010_PtGRANAD/lib_parameters/dune
+src/proto_010_PtGRANAD/lib_protocol/test/dune
+src/proto_010_PtGRANAD/lib_protocol/test/unit/dune
+src/proto_alpha/lib_client/test/dune
+src/proto_alpha/lib_parameters/dune
+src/proto_alpha/lib_protocol/test/dune
+src/proto_alpha/lib_protocol/test/unit/dune
+src/proto_demo_counter/lib_client/dune
+vendors/ocaml-lmdb/src/dune
+vendors/ocaml-lmdb/test/dune
+
+rg rule -g dune.inc -l | sort
+src/proto_000_Ps9mPmXa/lib_protocol/dune.inc
+src/proto_001_PtCJ7pwo/lib_protocol/dune.inc
+src/proto_002_PsYLVpVv/lib_protocol/dune.inc
+src/proto_003_PsddFKi3/lib_protocol/dune.inc
+src/proto_004_Pt24m4xi/lib_protocol/dune.inc
+src/proto_005_PsBABY5H/lib_protocol/dune.inc
+src/proto_005_PsBabyM1/lib_protocol/dune.inc
+src/proto_006_PsCARTHA/lib_protocol/dune.inc
+src/proto_007_PsDELPH1/lib_protocol/dune.inc
+src/proto_008_PtEdo2Zk/lib_protocol/dune.inc
+src/proto_008_PtEdoTez/lib_protocol/dune.inc
+src/proto_009_PsFLoren/lib_protocol/dune.inc
+src/proto_010_PtGRANAD/lib_protocol/dune.inc
+src/proto_alpha/lib_protocol/dune.inc
+src/proto_demo_counter/lib_protocol/dune.inc
+src/proto_demo_noops/lib_protocol/dune.inc
+src/proto_genesis/lib_protocol/dune.inc
+src/proto_genesis_carthagenet/lib_protocol/dune.inc
+
+#### ocaml
+
+rg rule -g dune | wc -l
+=> 23
+
+rg rule -g dune -l | wc -l
+=> 12
+
+rg rule -g dune -l | sort
+asmcomp/dune
+bytecomp/dune
+debugger/dune
+dune
+lambda/dune
+ocamldoc/dune
+ocamltest/dune
+otherlibs/dynlink/dune
+parsing/dune
+runtime/caml/dune
+toplevel/dune
+utils/dune

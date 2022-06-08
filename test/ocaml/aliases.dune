@@ -1,0 +1,25 @@
+;; ocaml/dune
+
+(alias
+ (name world)
+ (deps ocamlc.byte
+       ocamlopt.byte
+;       debugger/ocamldebug.byte
+;       ocamldoc/ocamldoc.byte
+       ocamltest/ocamltest.byte
+       toplevel/ocaml.byte
+       toplevel/expunge.exe
+       ))
+
+(alias
+  (name libs)
+  (deps
+    ocamloptcomp.cma
+    ocamlmiddleend.cma
+    ocamlcommon.cma
+    runtime/runtime.cma
+    stdlib/stdlib.cma
+    ocamlbytecomp.cma
+    ocamltest/ocamltest_core_and_plugin.cma
+    toplevel/ocamltoplevel.cma
+  ))

@@ -1,11 +1,27 @@
 ;; (display "loading @camlark//scm/utils.scm") (newline)
 
+(define (last list)
+   (if (zero? (length (cdr list)))
+      (car list)
+      (last (cdr list))))
+
+(load "s7/stuff.scm")
+
 (set! *#readers*
       (cons (cons #\h (lambda (str)
 			(and (string=? str "h") ; #h(...)
 			     (apply hash-table (read)))))
 	    *#readers*))
 *#readers*
+
+(define (sym<? s1 s2)
+  (let ((x1 (symbol->string s1)) (x2 (symbol->string s2)))
+    (string<? x1 x2)))
+
+(define (modules<? s1 s2)
+  (let ((x1 (if (symbol? s1) (symbol->string s1) s1))
+        (x2 (if (symbol? s2) (symbol->string s2) s2)))
+    (string<? x1 x2)))
 
 ;; (modules Registerer), (modules (:standard \ legacy_store_builder))
 ;; (modules)
@@ -24,7 +40,8 @@
         #t
         (let* ((m (if (symbol? module) (symbol->string module)
                      (copy module)))
-              (bn (bname (car srcfiles))))
+               (bn (bname (car srcfiles))))
+
           (if (string=? m bn)
               #f
               (begin
@@ -60,42 +77,43 @@
 		((hash-table? obj) (make-hash-table size))))
 
 ;; s7test.scm
-(define* (remove-if predicate sequence from-end (start 0) end count (key identity))
-  (let* ((len (length sequence))
-	 (nd (or (and (number? end) end) len))
-	 (num (if (number? count) count len))
-	 (changed 0))
-    (if (not (positive? num))
-	sequence
-	(let ((result ()))
-	  (if (null? from-end)
-	      (do ((i 0 (+ i 1)))
-		  ((= i len))
-		(if (or (< i start)
-			(>= i nd)
-			(>= changed num)
-			(not (predicate (key (sequence i)))))
-		    (set! result (cons (sequence i) result))
-		    (set! changed (+ changed 1))))
-	      (do ((i (- len 1) (- i 1)))
-		  ((< i 0))
-		(if (or (< i start)
-			(>= i nd)
-			(>= changed num)
-			(not (predicate (key (sequence i)))))
-		    (set! result (cons (sequence i) result))
-		    (set! changed (+ changed 1)))))
-	  (let* ((len (length result))
-		 (obj (make sequence len))
-		 (vals (if (null? from-end) (reverse result) result)))
-	    (do ((i 0 (+ i 1)))
-		((= i len))
-	      (set! (obj i) (vals i)))
-	    obj)))))
+;; (define* (remove-if predicate sequence from-end (start 0) end count (key identity))
+;;   (let* ((len (length sequence))
+;; 	 (nd (or (and (number? end) end) len))
+;; 	 (num (if (number? count) count len))
+;; 	 (changed 0))
+;;     (if (not (positive? num))
+;; 	sequence
+;; 	(let ((result ()))
+;; 	  (if (null? from-end)
+;; 	      (do ((i 0 (+ i 1)))
+;; 		  ((= i len))
+;; 		(if (or (< i start)
+;; 			(>= i nd)
+;; 			(>= changed num)
+;; 			(not (predicate (key (sequence i)))))
+;; 		    (set! result (cons (sequence i) result))
+;; 		    (set! changed (+ changed 1))))
+;; 	      (do ((i (- len 1) (- i 1)))
+;; 		  ((< i 0))
+;; 		(if (or (< i start)
+;; 			(>= i nd)
+;; 			(>= changed num)
+;; 			(not (predicate (key (sequence i)))))
+;; 		    (set! result (cons (sequence i) result))
+;; 		    (set! changed (+ changed 1)))))
+;; 	  (let* ((len (length result))
+;; 		 (obj (make sequence len))
+;; 		 (vals (if (null? from-end) (reverse result) result)))
+;; 	    (do ((i 0 (+ i 1)))
+;; 		((= i len))
+;; 	      (set! (obj i) (vals i)))
+;; 	    obj)))))
 
 ;; s7test.scm
 (define* (remove item sequence from-end (test eql) (start 0) end count (key identity))
-  (remove-if (lambda (arg) (test item arg)) sequence from-end start end count key))
+  (remove-if list (lambda (arg) (test item arg)) sequence))
+  ;; (remove-if (lambda (arg) (test item arg)) sequence from-end start end count key))
 
 ;; s7test.scm
 (define-macro* (delete item sequence from-end (test eql) (start 0) end count (key identity))
@@ -112,6 +130,22 @@
                            ch))
                      str)))
 
+;; convert a-b-c to a_b_c
+(define (undash str)
+  (apply string (map (lambda (ch)
+                       (if (char=? ch #\-)
+                           #\_
+                           ch))
+                     str)))
+
+;; convert a.b.c to a/b/c
+(define (enslash str)
+  (apply string (map (lambda (ch)
+                       (if (char=? ch #\.)
+                           #\/
+                           ch))
+                     str)))
+
 (define (normalize-module-name mname)
   (let ((s (if (symbol? mname)
                (symbol->string mname)
@@ -123,19 +157,26 @@
     (string-set! s 0 (char-upcase (string-ref s 0)))
     (string->symbol s)))
 
+(define filename-cache (make-hash-table))
+
 (define (file-name->module-name path)
-  (let* ((last-slash (string-index-right path (lambda (c) (eq? c #\/))))
-         (fname (if last-slash
-                       (string-drop path (+ last-slash 1))
-                       path))
-         (mraw (if (string-suffix? ".ml" fname)
-                   (string-drop-right fname 3)
-                   (if (string-suffix? ".mli" fname)
-                       (string-drop-right fname 4)
-                       (error 'bad-filename
-                              (string-append "extension should be .ml or .mli: "
-                                             fname))))))
-    (normalize-module-name mraw)))
+  (if-let ((modname (filename-cache path)))
+          modname
+          (let* ((last-slash (string-index-right path
+                                                 (lambda (c) (eq? c #\/))))
+                 (fname (if last-slash
+                            (string-drop path (+ last-slash 1))
+                            path))
+                 (mraw (if (string-suffix? ".ml" fname)
+                           (string-drop-right fname 3)
+                           (if (string-suffix? ".mli" fname)
+                               (string-drop-right fname 4)
+                               (error 'bad-filename
+                                      (string-append "extension should be .ml or .mli: "
+                                                     fname)))))
+                 (modname (normalize-module-name mraw)))
+            (hash-table-set! filename-cache path modname)
+            modname)))
 
 ;; s7test.scm
 (define (flatten lst)
@@ -167,3 +208,22 @@
        (if (and ,@variables)
 	   ,true
 	   ,false))))
+
+(define (dirname path)
+  (let ((last-slash (string-index-right path (lambda (c) (eq? c #\/)))))
+    (if last-slash
+        (string-take path last-slash)
+        path)))
+
+(define (basename path)
+  (let ((last-slash (string-index-right path (lambda (c) (eq? c #\/)))))
+    (string-drop path (+ last-slash 1))))
+
+(define (fs-glob->list pattern)
+  ;;(with-let (sublet *libc* :pattern pattern)
+  (let ((g (glob.make)))
+    (glob pattern 0 g)
+    (let ((res (glob.gl_pathv g)))
+      (globfree g)
+      res)))
+;;)
